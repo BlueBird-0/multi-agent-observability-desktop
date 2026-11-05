@@ -409,7 +409,7 @@ index 8670fc5..c6611a9 100644
  }
  </style>
 diff --git a/apps/client/src/components/EventTimeline.vue b/apps/client/src/components/EventTimeline.vue
-index a0ec01c..17fe62c 100644
+index a0ec01c..0e90cca 100644
 --- a/apps/client/src/components/EventTimeline.vue
 +++ b/apps/client/src/components/EventTimeline.vue
 @@ -1,8 +1,8 @@
@@ -423,6 +423,58 @@ index a0ec01c..17fe62c 100644
          Agent Event Stream
        </h2>
  
+@@ -100,7 +100,7 @@
+ </template>
+ 
+ <script setup lang="ts">
+-import { ref, computed, watch, nextTick } from 'vue';
++import { ref, computed, watch, nextTick, onMounted, onUnmounted } from 'vue';
+ import type { HookEvent } from '../types';
+ import EventRow from './EventRow.vue';
+ import { useEventColors } from '../composables/useEventColors';
+@@ -170,17 +170,38 @@ const scrollToBottom = () => {
+   }
+ };
+ 
++// Only a user scrolling up turns follow mode off; layout changes (lanes opening, rows animating in)
++// can leave the list short of the bottom without the user doing anything.
++let lastScrollTop = 0;
+ const handleScroll = () => {
+   if (!scrollContainer.value) return;
+-  
++
+   const { scrollTop, scrollHeight, clientHeight } = scrollContainer.value;
+   const isAtBottom = scrollHeight - scrollTop - clientHeight < 50;
+-  
+-  if (isAtBottom !== props.stickToBottom) {
+-    emit('update:stickToBottom', isAtBottom);
++  const movedUp = scrollTop < lastScrollTop - 2;
++  lastScrollTop = scrollTop;
++
++  if (isAtBottom && !props.stickToBottom) {
++    emit('update:stickToBottom', true);
++  } else if (!isAtBottom && movedUp && props.stickToBottom) {
++    emit('update:stickToBottom', false);
+   }
+ };
+ 
++// While following, stay pinned to the bottom whenever the list or its content changes size.
++let resizeObserver: ResizeObserver | null = null;
++onMounted(() => {
++  resizeObserver = new ResizeObserver(() => {
++    if (props.stickToBottom) scrollToBottom();
++  });
++  if (scrollContainer.value) {
++    resizeObserver.observe(scrollContainer.value);
++    for (const child of Array.from(scrollContainer.value.children)) resizeObserver.observe(child);
++  }
++  scrollToBottom();
++});
++onUnmounted(() => resizeObserver?.disconnect());
++
+ watch(() => props.events.length, async () => {
+   if (props.stickToBottom) {
+     await nextTick();
 diff --git a/apps/client/src/components/LivePulseChart.vue b/apps/client/src/components/LivePulseChart.vue
 index 2c60a8a..2e5bd31 100644
 --- a/apps/client/src/components/LivePulseChart.vue
@@ -579,8 +631,81 @@ index 2c60a8a..2e5bd31 100644
  const handleWindowResize = () => {
    windowHeight.value = window.innerHeight;
  };
+diff --git a/apps/client/src/components/StickScrollButton.vue b/apps/client/src/components/StickScrollButton.vue
+index 66ae80d..7a735d4 100644
+--- a/apps/client/src/components/StickScrollButton.vue
++++ b/apps/client/src/components/StickScrollButton.vue
+@@ -1,35 +1,33 @@
+ <template>
++  <!-- Follow-mode pill: "Live" while the stream follows new events, "Latest" once the user scrolls away. -->
+   <button
+     @click="$emit('toggle')"
+-    class="fixed bottom-6 right-6 mobile:bottom-4 mobile:right-4 p-4 mobile:p-3 rounded-full shadow-lg hover:shadow-xl transition-all duration-200 min-w-[44px] min-h-[44px] flex items-center justify-center border-2 transform hover:scale-110"
+-    :class="[
+-      stickToBottom 
+-        ? 'bg-gradient-to-r from-[var(--theme-primary)] to-[var(--theme-primary-light)] text-white border-[var(--theme-primary-dark)] drop-shadow-md' 
+-        : 'bg-[var(--theme-bg-primary)] hover:bg-[var(--theme-bg-secondary)] text-[var(--theme-text-primary)] border-[var(--theme-border-primary)] hover:border-[var(--theme-primary)]'
+-    ]"
+-    :title="stickToBottom ? 'Disable auto-scroll' : 'Enable auto-scroll'"
++    class="fixed bottom-5 right-5 mobile:bottom-3 mobile:right-3 z-20 inline-flex items-center gap-2 h-9 pl-3 pr-3.5 rounded-full text-xs font-semibold border shadow-lg backdrop-blur-sm transition-colors duration-150"
++    :class="stickToBottom
++      ? 'bg-[var(--theme-bg-primary)]/90 text-[var(--theme-text-secondary)] border-[var(--theme-border-primary)] hover:border-emerald-500/60'
++      : 'bg-[var(--theme-primary)] text-white border-[var(--theme-primary)] hover:brightness-110'"
++    :title="stickToBottom ? 'Following new events — click to pause auto-scroll' : 'Auto-scroll paused — click to jump to the latest event and follow again'"
++    :aria-pressed="stickToBottom"
+   >
+-    <svg
+-      class="w-6 h-6 mobile:w-5 mobile:h-5 drop-shadow-sm"
+-      fill="none"
+-      stroke="currentColor"
+-      viewBox="0 0 24 24"
+-    >
+-      <path
+-        v-if="stickToBottom"
+-        stroke-linecap="round"
+-        stroke-linejoin="round"
+-        stroke-width="2"
+-        d="M19 14l-7 7m0 0l-7-7m7 7V3"
+-      />
+-      <path
+-        v-else
+-        stroke-linecap="round"
+-        stroke-linejoin="round"
+-        stroke-width="2"
+-        d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6v.01"
+-      />
+-    </svg>
++    <template v-if="stickToBottom">
++      <span class="relative flex h-2 w-2">
++        <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
++        <span class="relative inline-flex h-2 w-2 rounded-full bg-emerald-500"></span>
++      </span>
++      <span>Live</span>
++      <svg class="w-3.5 h-3.5 opacity-70" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
++        <rect x="6" y="5" width="4" height="14" rx="1" />
++        <rect x="14" y="5" width="4" height="14" rx="1" />
++      </svg>
++    </template>
++    <template v-else>
++      <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
++        <path d="M12 5v12" />
++        <path d="M6 11l6 6 6-6" />
++        <path d="M5 20h14" />
++      </svg>
++      <span>Latest</span>
++    </template>
+   </button>
+ </template>
+ 
+@@ -41,4 +39,4 @@ defineProps<{
+ defineEmits<{
+   toggle: [];
+ }>();
+-</script>
+\ No newline at end of file
++</script>
 diff --git a/apps/client/src/composables/useEventColors.ts b/apps/client/src/composables/useEventColors.ts
-index 9e616d4..7e257cf 100644
+index 9e616d4..159bfa9 100644
 --- a/apps/client/src/composables/useEventColors.ts
 +++ b/apps/client/src/composables/useEventColors.ts
 @@ -1,18 +1,16 @@
@@ -613,7 +738,7 @@ index 9e616d4..7e257cf 100644
    // Improved hash function with better distribution
    const hashString = (str: string): number => {
      let hash = 7151;
-@@ -22,85 +20,21 @@ export function useEventColors() {
+@@ -22,85 +20,22 @@ export function useEventColors() {
      return Math.abs(hash >>> 0); // Use unsigned 32-bit integer
    };
  
@@ -645,7 +770,8 @@ index 9e616d4..7e257cf 100644
 -      'bg-teal-500': 'from-teal-500 to-teal-600',
 -      'bg-cyan-500': 'from-cyan-500 to-cyan-600',
 -    };
-+  const sessionIndex = (sessionId: string) => hashString(sessionId) % SESSION_HEX.length;
++  // Hash the short id (first 8 chars) so full ids and the 8-char labels get the same color.
++  const sessionIndex = (sessionId: string) => hashString(sessionId.slice(0, 8)) % SESSION_HEX.length;
  
 -    return `bg-gradient-to-r ${gradientMap[baseColor] || 'from-gray-500 to-gray-600'}`;
 -  };
@@ -708,7 +834,7 @@ index 9e616d4..7e257cf 100644
  
    return {
      getColorForSession,
-@@ -110,4 +44,4 @@ export function useEventColors() {
+@@ -110,4 +45,4 @@ export function useEventColors() {
      getHexColorForSession,
      getHexColorForApp
    };

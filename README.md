@@ -6,12 +6,19 @@ This repository does **not** contain the original project. The installer downloa
 
 [한국어 안내는 아래에 있습니다](#한국어)
 
+![Three Claude Code sessions in one window: combined activity on top, one lane per session below](docs/screenshot-overview.png)
+
+<sub>Sample data: three sessions on two machines. Each bar is one second; icons show the tools used (❌ = failed call).</sub>
+
 ## What it changes
 
 - **Own window**: the dashboard opens in an Edge app-mode window (no address bar). The event server runs inside it; close the window and everything stops.
 - **No Python**: hooks are sent by a small Bun script instead of `uv` + Python, and run asynchronously, so Claude Code never waits on them.
 - **Per-session lanes, automatic**: every active session gets its own graph row; the combined "Live Activity Pulse" opens only while nothing is running.
 - **Cleaner look**: thin header, compact chips, rounded bars stacked by session color, tool icons stacked on light badges from the bottom of each bar (readable on dark themes), a colorblind-checked session palette, dark theme by default.
+- **Clear follow mode**: a "Live" pill while the event list follows new events, "Latest" once you scroll away (click to jump back).
+
+![Default view while sessions are running: one lane per session](docs/screenshot-lanes.png)
 
 ## Requirements
 
@@ -68,6 +75,9 @@ Removes the hooks and shortcuts (history in `%LOCALAPPDATA%\ClaudeObservability`
 - **Python 불필요**: 훅을 `uv` + Python 대신 Bun 스크립트로 보내고, 백그라운드로 돌아 Claude Code를 기다리게 하지 않습니다.
 - **세션별 그래프 자동 표시**: 활동 중인 세션마다 그래프 한 줄이 생기고, 전체 그래프(Live Activity Pulse)는 아무 세션도 돌지 않을 때만 펼쳐집니다.
 - **깔끔한 디자인**: 얇은 상단 줄, 작은 칩, 세션 색으로 쌓은 둥근 막대, 막대 아래쪽부터 흰 배지 위에 쌓은 도구 아이콘(다크 테마에서도 잘 보임), 색약을 고려한 세션 색, 기본 다크 테마.
+- **알기 쉬운 자동 스크롤**: 이벤트 목록이 새 이벤트를 따라가는 동안은 "Live", 위로 스크롤하면 "Latest"로 바뀝니다(누르면 최신으로 이동).
+
+화면 예시는 위 영어 안내의 스크린샷을 보세요(예시 데이터: 두 대의 PC에서 도는 세션 3개).
 
 ### 필요한 것
 
