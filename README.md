@@ -41,7 +41,7 @@ Windows 10/11, [Git](https://git-scm.com/download/win), and [Bun](https://bun.sh
 ### One line (PowerShell)
 
 ```powershell
-& ([scriptblock]::Create((irm https://raw.githubusercontent.com/OWNER/multi-agent-observability-desktop/main/install.ps1)))
+& ([scriptblock]::Create((irm https://raw.githubusercontent.com/BlueBird-0/multi-agent-observability-desktop/main/install.ps1)))
 ```
 
 Paste it into a PowerShell window. Works with Windows' default execution policy. Add options at the end, e.g. `... ))) -SourceApp my-laptop`.
@@ -49,7 +49,7 @@ Paste it into a PowerShell window. Works with Windows' default execution policy.
 ### From a clone
 
 ```powershell
-git clone https://github.com/OWNER/multi-agent-observability-desktop
+git clone https://github.com/BlueBird-0/multi-agent-observability-desktop
 cd multi-agent-observability-desktop
 powershell -ExecutionPolicy Bypass -File install.ps1
 ```
@@ -65,7 +65,7 @@ Options: `-InstallDir <path>` (default `%USERPROFILE%\claude-observability`), `-
 
 ### Installing with Claude Code (or another AI agent)
 
-You can ask Claude Code: *"Install https://github.com/OWNER/multi-agent-observability-desktop following the README's agent section."* Notes for the agent:
+You can ask Claude Code: *"Install https://github.com/BlueBird-0/multi-agent-observability-desktop following the README's agent section."* Notes for the agent:
 
 - **Run the installer with the PowerShell tool, not a sandboxed Bash tool.** Claude Code's Bash sandbox on Windows virtualizes `%LOCALAPPDATA%`, so files the installer writes there (launcher script, icon) are invisible to Windows and the desktop shortcut will not start.
 - Command: the one-line install above (or `install.ps1` from a clone with `-ExecutionPolicy Bypass`). Pass `-SourceApp <name>` if the user wants a specific label.
@@ -135,7 +135,7 @@ Windows 10/11, [Git](https://git-scm.com/download/win), [Bun](https://bun.sh)(No
 **한 줄 설치 (PowerShell)**
 
 ```powershell
-& ([scriptblock]::Create((irm https://raw.githubusercontent.com/OWNER/multi-agent-observability-desktop/main/install.ps1)))
+& ([scriptblock]::Create((irm https://raw.githubusercontent.com/BlueBird-0/multi-agent-observability-desktop/main/install.ps1)))
 ```
 
 PowerShell 창에 붙여 넣으면 됩니다. Windows 기본 실행 정책에서도 동작합니다. 옵션은 끝에 붙입니다(예: `... ))) -SourceApp my-laptop`).
@@ -143,7 +143,7 @@ PowerShell 창에 붙여 넣으면 됩니다. Windows 기본 실행 정책에서
 **저장소를 받아서 설치**
 
 ```powershell
-git clone https://github.com/OWNER/multi-agent-observability-desktop
+git clone https://github.com/BlueBird-0/multi-agent-observability-desktop
 cd multi-agent-observability-desktop
 powershell -ExecutionPolicy Bypass -File install.ps1
 ```
@@ -158,7 +158,7 @@ powershell -ExecutionPolicy Bypass -File install.ps1
 
 ### Claude Code(AI 에이전트)로 설치하기
 
-Claude Code에 이렇게 부탁하면 됩니다: *"https://github.com/OWNER/multi-agent-observability-desktop 를 README의 에이전트 안내대로 설치해 줘."* 에이전트가 지킬 점:
+Claude Code에 이렇게 부탁하면 됩니다: *"https://github.com/BlueBird-0/multi-agent-observability-desktop 를 README의 에이전트 안내대로 설치해 줘."* 에이전트가 지킬 점:
 
 - **설치는 PowerShell 도구로 실행합니다. 샌드박스가 걸린 Bash 도구로 실행하지 않습니다.** Windows에서 Claude Code의 Bash 샌드박스는 `%LOCALAPPDATA%`를 가상화하기 때문에, 설치가 그곳에 만드는 파일(실행 스크립트, 아이콘)이 Windows에서 보이지 않고 바탕화면 바로가기가 실행되지 않습니다.
 - 명령: 위의 한 줄 설치(또는 저장소를 받은 뒤 `-ExecutionPolicy Bypass`로 `install.ps1`). 사용자가 원하는 PC 이름이 있으면 `-SourceApp <이름>`을 붙입니다.

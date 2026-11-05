@@ -5,14 +5,14 @@
 # Claude Code hooks plus desktop / Start menu shortcuts.
 #
 # From a clone:   powershell -ExecutionPolicy Bypass -File install.ps1 [options]
-# One line:       & ([scriptblock]::Create((irm https://raw.githubusercontent.com/OWNER/multi-agent-observability-desktop/main/install.ps1)))
+# One line:       & ([scriptblock]::Create((irm https://raw.githubusercontent.com/BlueBird-0/multi-agent-observability-desktop/main/install.ps1)))
 # Options:        -InstallDir <path>  -SourceApp <name>  -NoSetup (build only, no hooks/shortcuts)
 param(
     [string]$InstallDir = (Join-Path $env:USERPROFILE 'claude-observability'),
     [string]$SourceApp = $env:COMPUTERNAME,
     [switch]$NoSetup,
     # Where this repository lives; used when the script runs without its files around it (one-line install).
-    [string]$OverlayRepo = 'https://github.com/OWNER/multi-agent-observability-desktop.git'
+    [string]$OverlayRepo = 'https://github.com/BlueBird-0/multi-agent-observability-desktop.git'
 )
 $ErrorActionPreference = 'Stop'
 
