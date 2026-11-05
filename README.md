@@ -26,19 +26,42 @@ Windows 10/11, [Git](https://git-scm.com/download/win), and [Bun](https://bun.sh
 
 ## Install
 
+### One line (PowerShell)
+
 ```powershell
-git clone <this repository>
+& ([scriptblock]::Create((irm https://raw.githubusercontent.com/OWNER/claude-observability-desktop/main/install.ps1)))
+```
+
+Paste it into a PowerShell window. Works with Windows' default execution policy. Add options at the end, e.g. `... ))) -SourceApp my-laptop`.
+
+### From a clone
+
+```powershell
+git clone https://github.com/OWNER/claude-observability-desktop
 cd claude-observability-desktop
 powershell -ExecutionPolicy Bypass -File install.ps1
 ```
 
 Options: `-InstallDir <path>` (default `%USERPROFILE%\claude-observability`), `-SourceApp <name>` (label shown for this PC, default the computer name).
 
-The installer:
+### What the installer does
+
 1. clones the original project into the install folder and checks out the tested commit,
 2. applies `patches/observability-desktop.patch` and copies `desktop/` to `apps/desktop`,
 3. runs `bun install` for the server and client,
 4. runs `bun apps/desktop/main.ts --install`, which builds the dashboard, adds 12 async hooks to `~/.claude/settings.json` (a timestamped backup is kept; older hooks from the original Python sender are replaced) and creates **Claude Observability** shortcuts on the desktop and in the Start menu.
+
+### Installing with Claude Code (or another AI agent)
+
+You can ask Claude Code: *"Install https://github.com/OWNER/claude-observability-desktop following the README's agent section."* Notes for the agent:
+
+- **Run the installer with the PowerShell tool, not a sandboxed Bash tool.** Claude Code's Bash sandbox on Windows virtualizes `%LOCALAPPDATA%`, so files the installer writes there (launcher script, icon) are invisible to Windows and the desktop shortcut will not start.
+- Command: the one-line install above (or `install.ps1` from a clone with `-ExecutionPolicy Bypass`). Pass `-SourceApp <name>` if the user wants a specific label.
+- The installer **edits `~/.claude/settings.json`**: it adds 12 async hooks and keeps a timestamped backup. Tell the user before running it. It only replaces hooks that point to `apps/desktop/main.ts` or `send_event.py`; other hooks are left alone.
+- Requirements: Git must be installed; Bun is installed with npm when Node.js exists. If neither Bun nor Node.js is present, ask the user to install one rather than guessing.
+- Verify (in PowerShell): `Test-Path "$env:LOCALAPPDATA\ClaudeObservability\launch.vbs"` is `True`, and a **Claude Observability** shortcut exists on the desktop. Opening it should make `http://127.0.0.1:4000/events/recent?limit=1` answer while the window is open.
+- New hooks take effect in Claude Code sessions immediately; nothing needs restarting.
+- Do not run `--uninstall` unless the user asks.
 
 ## Use
 
@@ -47,7 +70,7 @@ Open **Claude Observability**. Sessions appear as soon as Claude Code does anyth
 ## Uninstall
 
 ```powershell
-bun "%USERPROFILE%\claude-observability\apps\desktop\main.ts" --uninstall
+cmd /c bun "%USERPROFILE%\claude-observabilitypps\desktop\main.ts" --uninstall
 ```
 
 Removes the hooks and shortcuts (history in `%LOCALAPPDATA%\ClaudeObservability` is kept; delete that folder to remove it), then delete the install folder.
@@ -85,8 +108,18 @@ Windows 10/11, [Git](https://git-scm.com/download/win), [Bun](https://bun.sh)(No
 
 ### 설치
 
+**한 줄 설치 (PowerShell)**
+
 ```powershell
-git clone <이 저장소>
+& ([scriptblock]::Create((irm https://raw.githubusercontent.com/OWNER/claude-observability-desktop/main/install.ps1)))
+```
+
+PowerShell 창에 붙여 넣으면 됩니다. Windows 기본 실행 정책에서도 동작합니다. 옵션은 끝에 붙입니다(예: `... ))) -SourceApp my-laptop`).
+
+**저장소를 받아서 설치**
+
+```powershell
+git clone https://github.com/OWNER/claude-observability-desktop
 cd claude-observability-desktop
 powershell -ExecutionPolicy Bypass -File install.ps1
 ```
@@ -99,6 +132,18 @@ powershell -ExecutionPolicy Bypass -File install.ps1
 3. 서버와 화면의 패키지를 받습니다(`bun install`).
 4. `bun apps/desktop/main.ts --install`을 실행합니다. 화면을 빌드하고, `~/.claude/settings.json`에 백그라운드 훅 12개를 넣고(시각이 붙은 백업을 남기며, 원본 Python 훅은 교체), 바탕화면과 시작 메뉴에 **Claude Observability** 바로가기를 만듭니다.
 
+### Claude Code(AI 에이전트)로 설치하기
+
+Claude Code에 이렇게 부탁하면 됩니다: *"https://github.com/OWNER/claude-observability-desktop 를 README의 에이전트 안내대로 설치해 줘."* 에이전트가 지킬 점:
+
+- **설치는 PowerShell 도구로 실행합니다. 샌드박스가 걸린 Bash 도구로 실행하지 않습니다.** Windows에서 Claude Code의 Bash 샌드박스는 `%LOCALAPPDATA%`를 가상화하기 때문에, 설치가 그곳에 만드는 파일(실행 스크립트, 아이콘)이 Windows에서 보이지 않고 바탕화면 바로가기가 실행되지 않습니다.
+- 명령: 위의 한 줄 설치(또는 저장소를 받은 뒤 `-ExecutionPolicy Bypass`로 `install.ps1`). 사용자가 원하는 PC 이름이 있으면 `-SourceApp <이름>`을 붙입니다.
+- 설치는 **`~/.claude/settings.json`을 수정합니다**(백그라운드 훅 12개 추가, 시각이 붙은 백업 보관). 실행 전에 사용자에게 알립니다. `apps/desktop/main.ts`나 `send_event.py`를 가리키는 훅만 교체하고, 다른 훅은 건드리지 않습니다.
+- 필요한 것: Git은 설치되어 있어야 합니다. Bun은 Node.js가 있으면 npm으로 설치됩니다. Bun도 Node.js도 없으면 추측하지 말고 사용자에게 설치를 부탁합니다.
+- 확인(PowerShell에서): `Test-Path "$env:LOCALAPPDATA\ClaudeObservability\launch.vbs"`가 `True`이고, 바탕화면에 **Claude Observability** 바로가기가 있어야 합니다. 바로가기로 창을 열면 그동안 `http://127.0.0.1:4000/events/recent?limit=1`이 응답해야 합니다.
+- 새 훅은 Claude Code 세션에 바로 적용됩니다. 다시 시작할 것은 없습니다.
+- 사용자가 요청하지 않으면 `--uninstall`은 실행하지 않습니다.
+
 ### 사용
 
 **Claude Observability**를 엽니다. Claude Code가 무언가를 하는 순간 세션이 나타납니다. 이벤트는 **창이 열려 있는 동안만** 기록됩니다. 계속 기록하려면 창을 최소화해 두세요. 기록은 `%LOCALAPPDATA%\ClaudeObservability`에 있습니다.
@@ -106,7 +151,7 @@ powershell -ExecutionPolicy Bypass -File install.ps1
 ### 제거
 
 ```powershell
-bun "%USERPROFILE%\claude-observability\apps\desktop\main.ts" --uninstall
+cmd /c bun "%USERPROFILE%\claude-observabilitypps\desktop\main.ts" --uninstall
 ```
 
 훅과 바로가기를 지웁니다. 기록은 남으니 지우려면 `%LOCALAPPDATA%\ClaudeObservability` 폴더를 지우고, 설치 폴더도 지우면 됩니다.

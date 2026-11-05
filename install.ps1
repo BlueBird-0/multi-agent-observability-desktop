@@ -1,31 +1,58 @@
-# Claude Observability Desktop — installer (Windows)
+# Claude Observability Desktop - installer (Windows)
 #
 # Downloads the original project from its author's GitHub (pinned to a tested commit), applies this
 # repository's patch (new look, per-session lanes, desktop window mode), installs packages and sets up
 # Claude Code hooks plus desktop / Start menu shortcuts.
 #
-#   powershell -ExecutionPolicy Bypass -File install.ps1 [-InstallDir <path>] [-SourceApp <name>] [-NoSetup]
+# From a clone:   powershell -ExecutionPolicy Bypass -File install.ps1 [options]
+# One line:       & ([scriptblock]::Create((irm https://raw.githubusercontent.com/OWNER/claude-observability-desktop/main/install.ps1)))
+# Options:        -InstallDir <path>  -SourceApp <name>  -NoSetup (build only, no hooks/shortcuts)
 param(
     [string]$InstallDir = (Join-Path $env:USERPROFILE 'claude-observability'),
     [string]$SourceApp = $env:COMPUTERNAME,
-    [switch]$NoSetup   # build only: skip hooks and shortcuts (for testing)
+    [switch]$NoSetup,
+    # Where this repository lives; used when the script runs without its files around it (one-line install).
+    [string]$OverlayRepo = 'https://github.com/OWNER/claude-observability-desktop.git'
 )
 $ErrorActionPreference = 'Stop'
 
 $Upstream = 'https://github.com/disler/claude-code-hooks-multi-agent-observability.git'
 $UpstreamCommit = '8a6e5cf795df50767cea7123703751282a819697'
-$Here = $PSScriptRoot
 
 function Need($cmd, $hint) {
     if (-not (Get-Command $cmd -ErrorAction SilentlyContinue)) { throw "'$cmd' is required. $hint" }
 }
 Need git 'Install Git for Windows: https://git-scm.com/download/win'
-if (-not (Get-Command bun -ErrorAction SilentlyContinue)) {
-    Need npm 'Install Node.js (https://nodejs.org) or Bun (https://bun.sh), then run this again.'
-    Write-Host 'Installing Bun with npm...'
-    npm install -g bun | Out-Host
+
+# Bun: use it if present, otherwise install it with npm. Always call real executables (bun.exe, npm.cmd):
+# npm's *.ps1 shims are blocked by Windows' default execution policy.
+function Find-Bun {
+    $npmBun = Join-Path $env:APPDATA 'npm\node_modules\bun\bin\bun.exe'
+    $onPath = Get-Command bun.exe -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
+    if ($onPath) { return $onPath.Source }
+    if (Test-Path $npmBun) { return $npmBun }
+    $home_ = Join-Path $env:USERPROFILE '.bun\bin\bun.exe'
+    if (Test-Path $home_) { return $home_ }
+    return $null
 }
-$bun = (Get-Command bun).Source
+$bun = Find-Bun
+if (-not $bun) {
+    $npm = Get-Command npm.cmd -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
+    if (-not $npm) { throw 'Bun is required. Install Node.js (https://nodejs.org) or Bun (https://bun.sh), then run this again.' }
+    Write-Host 'Installing Bun with npm...'
+    & $npm.Source install -g bun | Out-Host
+    $bun = Find-Bun
+}
+if (-not $bun) { throw 'Bun was not found after installation. Open a new terminal and run this again.' }
+
+# This repository's files: next to the script, or a fresh download for the one-line install
+$Here = $PSScriptRoot
+if (-not $Here -or -not (Test-Path (Join-Path $Here 'patches\observability-desktop.patch'))) {
+    $Here = Join-Path $env:TEMP ("claude-observability-desktop-" + [Guid]::NewGuid().ToString('N').Substring(0, 8))
+    Write-Host "Downloading installer files from $OverlayRepo ..."
+    git clone --quiet --depth 1 $OverlayRepo $Here
+    if ($LASTEXITCODE -ne 0) { throw "Could not download $OverlayRepo" }
+}
 
 # 1) Original project at the tested commit
 if (Test-Path (Join-Path $InstallDir '.git')) {
