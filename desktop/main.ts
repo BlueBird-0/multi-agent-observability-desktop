@@ -1,0 +1,284 @@
+// Windows desktop mode for the observability dashboard, run with Bun (no Python, no compiled exe).
+//
+//   bun apps/desktop/main.ts                 open the dashboard window (starts the server if needed)
+//   bun apps/desktop/main.ts --install       build the client, add Claude Code hooks, create shortcuts
+//   bun apps/desktop/main.ts --uninstall     remove the hooks and shortcuts (data is kept)
+//   bun apps/desktop/main.ts --hook          hook sender: reads Claude Code hook JSON on stdin
+//
+// The server runs inside the window process: closing the window stops it, and hooks then fail
+// silently (events are not recorded while the window is closed).
+import { existsSync, mkdirSync, readFileSync, writeFileSync, copyFileSync, rmSync, openSync, readSync, closeSync, statSync } from 'node:fs';
+import { dirname, join, resolve } from 'node:path';
+import { homedir, hostname } from 'node:os';
+
+const PORT = Number(process.env.SERVER_PORT || 4000);
+const URL_ROOT = `http://127.0.0.1:${PORT}`;
+const APP_NAME = 'Claude Observability';
+const REPO_ROOT = resolve(import.meta.dir, '..', '..');
+const CLIENT_DIR = join(REPO_ROOT, 'apps', 'client');
+const WEB_DIR = join(CLIENT_DIR, 'dist');
+const DATA_DIR = join(process.env.LOCALAPPDATA || join(homedir(), 'AppData', 'Local'), 'ClaudeObservability');
+const SETTINGS_PATH = join(homedir(), '.claude', 'settings.json');
+const HOOK_EVENTS = [
+  'SessionStart', 'SessionEnd', 'UserPromptSubmit', 'PreToolUse', 'PostToolUse', 'PostToolUseFailure',
+  'PermissionRequest', 'Notification', 'SubagentStart', 'SubagentStop', 'Stop', 'PreCompact',
+];
+const TOOL_EVENTS = new Set(['PreToolUse', 'PostToolUse', 'PostToolUseFailure', 'PermissionRequest']);
+const HOOK_MARK = 'apps/desktop/main.ts'; // identifies hooks this tool installed
+
+const args = process.argv.slice(2);
+const argValue = (name: string, fallback: string) => {
+  const i = args.indexOf(name);
+  return i >= 0 && args[i + 1] ? args[i + 1] : fallback;
+};
+
+// ---------------------------------------------------------------- hook sender
+
+// Last model name recorded in the transcript tail (the dashboard shows it per session).
+function modelFromTranscript(path: string): string {
+  try {
+    const size = statSync(path).size;
+    const len = Math.min(size, 256 * 1024);
+    const buf = Buffer.alloc(len);
+    const fd = openSync(path, 'r');
+    readSync(fd, buf, 0, len, size - len);
+    closeSync(fd);
+    const lines = buf.toString('utf8').split('\n').reverse();
+    for (const line of lines) {
+      const m = line.match(/"model"\s*:\s*"([^"]+)"/);
+      if (m && m[1] !== '<synthetic>') return m[1];
+    }
+  } catch { /* transcript missing or unreadable */ }
+  return '';
+}
+
+async function runHook() {
+  try {
+    const input = JSON.parse(await Bun.stdin.text());
+    const type: string = input.hook_event_name || 'Unknown';
+    const event: Record<string, unknown> = {
+      source_app: argValue('--source-app', hostname()),
+      session_id: input.session_id || 'unknown',
+      hook_event_type: type,
+      payload: input,
+      timestamp: Date.now(),
+      model_name: input.transcript_path ? modelFromTranscript(input.transcript_path) : '',
+    };
+    for (const key of ['tool_name', 'tool_use_id', 'error', 'is_interrupt', 'permission_suggestions', 'agent_id',
+      'agent_type', 'agent_transcript_path', 'stop_hook_active', 'notification_type', 'custom_instructions', 'source', 'reason']) {
+      if (key in input) event[key] = input[key];
+    }
+    const res = await fetch(`${URL_ROOT}/events`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(event),
+      signal: AbortSignal.timeout(3000),
+    });
+    if (process.env.OBS_HOOK_DEBUG) console.error(`POST /events -> ${res.status}`);
+  } catch (e) {
+    // Dashboard closed or bad input: never block Claude Code. OBS_HOOK_DEBUG=1 shows why.
+    if (process.env.OBS_HOOK_DEBUG) console.error(e);
+  }
+  process.exit(0);
+}
+
+// ---------------------------------------------------------------- window
+
+async function serverAlreadyUp(): Promise<boolean> {
+  try {
+    const res = await fetch(`${URL_ROOT}/events/recent?limit=1`, { signal: AbortSignal.timeout(800) });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
+function findEdge(): string | null {
+  const candidates = [
+    join(process.env['ProgramFiles(x86)'] || 'C:\\Program Files (x86)', 'Microsoft', 'Edge', 'Application', 'msedge.exe'),
+    join(process.env.ProgramFiles || 'C:\\Program Files', 'Microsoft', 'Edge', 'Application', 'msedge.exe'),
+    join(process.env.LOCALAPPDATA || '', 'Microsoft', 'Edge', 'Application', 'msedge.exe'),
+  ];
+  return candidates.find(p => existsSync(p)) ?? null;
+}
+
+async function runWindow() {
+  if (!existsSync(join(WEB_DIR, 'index.html'))) {
+    console.error('Dashboard is not built yet. Run: bun apps/desktop/main.ts --install');
+    process.exit(1);
+  }
+  mkdirSync(DATA_DIR, { recursive: true });
+  process.env.SERVER_PORT = String(PORT);
+  process.env.OBS_DB_PATH = join(DATA_DIR, 'events.db');
+  process.env.OBS_STATIC_DIR = WEB_DIR;
+
+  // Another window (or a dev server) already owns the port: just open one more window.
+  const ownServer = !(await serverAlreadyUp());
+  if (ownServer) {
+    await import('../server/src/index.ts');
+  }
+
+  const edge = findEdge();
+  if (!edge) {
+    Bun.spawn(['cmd', '/c', 'start', '', URL_ROOT]);
+    if (!ownServer) process.exit(0);
+    return; // no app window to wait on: keep serving until the process is ended
+  }
+
+  const profileDir = join(DATA_DIR, 'webview-profile');
+  Bun.spawn([
+    edge,
+    `--app=${URL_ROOT}/`,
+    `--user-data-dir=${profileDir}`,
+    '--window-size=1280,860',
+    '--no-first-run',
+    '--no-default-browser-check',
+    '--disable-features=msEdgeSidebarV2,msHubApps,BackgroundModeAllowed',
+  ], { stdout: 'ignore', stderr: 'ignore' });
+
+  // msedge.exe hands the window to another process and returns at once, so its exit says nothing.
+  // The profile's "lockfile" is held (delete-on-close) for as long as that browser instance lives.
+  const lockfile = join(profileDir, 'lockfile');
+  const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
+  for (let i = 0; i < 60 && !existsSync(lockfile); i++) await sleep(250);
+  while (existsSync(lockfile)) await sleep(1000);
+  process.exit(0);
+}
+
+// ---------------------------------------------------------------- install / uninstall
+
+function readSettings(): Record<string, any> {
+  if (!existsSync(SETTINGS_PATH)) return {};
+  return JSON.parse(readFileSync(SETTINGS_PATH, 'utf8'));
+}
+
+// Hooks from this tool, or from the upstream Python sender (send_event.py), are replaced on install.
+function isObservabilityHook(h: any): boolean {
+  const text = `${h?.command ?? ''} ${(h?.args ?? []).join(' ')}`.replace(/\\/g, '/');
+  return text.includes(HOOK_MARK) || text.includes('send_event.py');
+}
+
+function stripObservabilityHooks(settings: Record<string, any>) {
+  const hooks = settings.hooks;
+  if (!hooks) return;
+  for (const event of Object.keys(hooks)) {
+    hooks[event] = (hooks[event] as any[])
+      .map(group => ({ ...group, hooks: (group.hooks || []).filter((h: any) => !isObservabilityHook(h)) }))
+      .filter(group => group.hooks.length > 0);
+    if (hooks[event].length === 0) delete hooks[event];
+  }
+  if (Object.keys(hooks).length === 0) delete settings.hooks;
+}
+
+function writeSettings(settings: Record<string, any>) {
+  mkdirSync(dirname(SETTINGS_PATH), { recursive: true });
+  if (existsSync(SETTINGS_PATH)) {
+    const stamp = new Date().toISOString().replace(/[-:]/g, '').slice(0, 15);
+    copyFileSync(SETTINGS_PATH, `${SETTINGS_PATH}.bak-${stamp}`);
+  }
+  writeFileSync(SETTINGS_PATH, JSON.stringify(settings, null, 2) + '\n', 'utf8');
+}
+
+// 256px PNG wrapped as a single PNG-compressed .ico entry.
+function writeIcon(): string {
+  const png = readFileSync(join(import.meta.dir, 'assets', 'icon-256.png'));
+  const head = Buffer.alloc(22);
+  head.writeUInt16LE(0, 0); head.writeUInt16LE(1, 2); head.writeUInt16LE(1, 4);
+  head.writeUInt8(0, 6); head.writeUInt8(0, 7); head.writeUInt8(0, 8); head.writeUInt8(0, 9);
+  head.writeUInt16LE(1, 10); head.writeUInt16LE(32, 12);
+  head.writeUInt32LE(png.length, 14); head.writeUInt32LE(22, 18);
+  const ico = join(DATA_DIR, 'icon.ico');
+  writeFileSync(ico, Buffer.concat([head, png]));
+  return ico;
+}
+
+function shortcutPaths(): string[] {
+  const appData = process.env.APPDATA || join(homedir(), 'AppData', 'Roaming');
+  const desktop = Bun.spawnSync(['powershell', '-NoProfile', '-Command', "[Environment]::GetFolderPath('Desktop')"])
+    .stdout.toString().trim() || join(homedir(), 'Desktop');
+  return [
+    join(desktop, `${APP_NAME}.lnk`),
+    join(appData, 'Microsoft', 'Windows', 'Start Menu', 'Programs', `${APP_NAME}.lnk`),
+  ];
+}
+
+function runPowerShell(script: string) {
+  const r = Bun.spawnSync(['powershell', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', script]);
+  if (r.exitCode !== 0) throw new Error(r.stderr.toString());
+}
+
+function install() {
+  const bun = process.execPath;
+  const sourceApp = argValue('--source-app', hostname());
+  mkdirSync(DATA_DIR, { recursive: true });
+
+  console.log('1/4 Building the dashboard (vite build)...');
+  const build = Bun.spawnSync([bun, 'x', 'vite', 'build'], { cwd: CLIENT_DIR, stdout: 'inherit', stderr: 'inherit' });
+  if (build.exitCode !== 0) throw new Error('vite build failed (did you run "bun install" in apps/client and apps/server?)');
+  // App window has its own profile: start it in the dark theme until the user picks another.
+  const index = join(WEB_DIR, 'index.html');
+  let html = readFileSync(index, 'utf8');
+  html = html.replace(/<link rel="icon"[^>]*>/, '<link rel="icon" type="image/png" href="/favicon.png" />');
+  html = html.replace('</head>', '<script>try{if(!localStorage.getItem("theme"))localStorage.setItem("theme","dark")}catch(e){}</script></head>');
+  writeFileSync(index, html, 'utf8');
+  copyFileSync(join(import.meta.dir, 'assets', 'icon-256.png'), join(WEB_DIR, 'favicon.png'));
+
+  console.log(`2/4 Adding Claude Code hooks to ${SETTINGS_PATH} (backup kept)...`);
+  const settings = readSettings();
+  stripObservabilityHooks(settings);
+  settings.hooks ??= {};
+  const mainTs = join(import.meta.dir, 'main.ts');
+  for (const event of HOOK_EVENTS) {
+    const group: Record<string, any> = {
+      hooks: [{ type: 'command', command: bun, args: [mainTs, '--hook', '--source-app', sourceApp], async: true, timeout: 15 }],
+    };
+    if (TOOL_EVENTS.has(event)) group.matcher = '';
+    (settings.hooks[event] ??= []).push(group);
+  }
+  writeSettings(settings);
+
+  console.log('3/4 Creating desktop and Start menu shortcuts...');
+  // A tiny VBScript starts Bun without a console window.
+  const vbs = join(DATA_DIR, 'launch.vbs');
+  writeFileSync(vbs, `CreateObject("WScript.Shell").Run """${bun}"" ""${mainTs}""", 0, False\r\n`, 'utf8');
+  const ico = writeIcon();
+  for (const lnk of shortcutPaths()) {
+    mkdirSync(dirname(lnk), { recursive: true });
+    runPowerShell(
+      `$s=(New-Object -ComObject WScript.Shell).CreateShortcut('${lnk.replace(/'/g, "''")}');` +
+      `$s.TargetPath='${join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'wscript.exe')}';` +
+      `$s.Arguments='"${vbs}"';$s.WorkingDirectory='${DATA_DIR}';$s.IconLocation='${ico},0';` +
+      `$s.Description='Claude Code multi-agent observability dashboard';$s.Save()`
+    );
+  }
+
+  console.log(`4/4 Done. Data folder: ${DATA_DIR}`);
+  console.log(`Open "${APP_NAME}" from the desktop or Start menu. Hook source name: ${sourceApp}`);
+  console.log('Events are recorded only while the window is open (minimize it to keep recording).');
+}
+
+function uninstall() {
+  const settings = readSettings();
+  stripObservabilityHooks(settings);
+  writeSettings(settings);
+  for (const lnk of shortcutPaths()) rmSync(lnk, { force: true });
+  rmSync(join(DATA_DIR, 'launch.vbs'), { force: true });
+  console.log(`Removed hooks and shortcuts. Data kept in ${DATA_DIR} (delete it to remove history).`);
+}
+
+// ---------------------------------------------------------------- entry
+
+// Top-level await: an un-awaited promise does not keep Bun alive while stdin is being read.
+if (args.includes('--hook')) {
+  await runHook();
+} else if (args.includes('--install')) {
+  install();
+} else if (args.includes('--uninstall')) {
+  uninstall();
+} else if (args.length === 0) {
+  await runWindow();
+} else {
+  console.error(`Unknown option: ${args.join(' ')}
+Use --install, --uninstall, --hook, or no option to open the window.`);
+  process.exit(2);
+}
