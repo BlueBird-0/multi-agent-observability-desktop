@@ -1,18 +1,18 @@
-# Claude Observability Desktop - installer (Windows)
+# Multi-Agent Observability Desktop - installer (Windows)
 #
 # Downloads the original project from its author's GitHub (pinned to a tested commit), applies this
 # repository's patch (new look, per-session lanes, desktop window mode), installs packages and sets up
 # Claude Code hooks plus desktop / Start menu shortcuts.
 #
 # From a clone:   powershell -ExecutionPolicy Bypass -File install.ps1 [options]
-# One line:       & ([scriptblock]::Create((irm https://raw.githubusercontent.com/OWNER/claude-observability-desktop/main/install.ps1)))
+# One line:       & ([scriptblock]::Create((irm https://raw.githubusercontent.com/OWNER/multi-agent-observability-desktop/main/install.ps1)))
 # Options:        -InstallDir <path>  -SourceApp <name>  -NoSetup (build only, no hooks/shortcuts)
 param(
     [string]$InstallDir = (Join-Path $env:USERPROFILE 'claude-observability'),
     [string]$SourceApp = $env:COMPUTERNAME,
     [switch]$NoSetup,
     # Where this repository lives; used when the script runs without its files around it (one-line install).
-    [string]$OverlayRepo = 'https://github.com/OWNER/claude-observability-desktop.git'
+    [string]$OverlayRepo = 'https://github.com/OWNER/multi-agent-observability-desktop.git'
 )
 $ErrorActionPreference = 'Stop'
 
@@ -48,7 +48,7 @@ if (-not $bun) { throw 'Bun was not found after installation. Open a new termina
 # This repository's files: next to the script, or a fresh download for the one-line install
 $Here = $PSScriptRoot
 if (-not $Here -or -not (Test-Path (Join-Path $Here 'patches\observability-desktop.patch'))) {
-    $Here = Join-Path $env:TEMP ("claude-observability-desktop-" + [Guid]::NewGuid().ToString('N').Substring(0, 8))
+    $Here = Join-Path $env:TEMP ("multi-agent-observability-desktop-" + [Guid]::NewGuid().ToString('N').Substring(0, 8))
     Write-Host "Downloading installer files from $OverlayRepo ..."
     git clone --quiet --depth 1 $OverlayRepo $Here
     if ($LASTEXITCODE -ne 0) { throw "Could not download $OverlayRepo" }
