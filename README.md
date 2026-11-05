@@ -4,11 +4,23 @@ A Windows desktop skin for **[disler/claude-code-hooks-multi-agent-observability
 
 This repository does **not** contain the original project. The installer downloads it from the original author's GitHub (pinned to a tested commit) and applies the changes kept here. All credit for the original observability system goes to [disler](https://github.com/disler).
 
-[한국어 안내는 아래에 있습니다](#한국어)
-
 ![Three Claude Code sessions in one window: combined activity on top, one lane per session below](docs/screenshot-overview.png)
 
 <sub>Sample data: three sessions on two machines. Each bar is one second; icons show the tools used (❌ = failed call).</sub>
+
+[한국어 안내는 아래에 있습니다](#한국어)
+
+## Thanks, and why this exists
+
+First, thank you to [disler](https://github.com/disler). [claude-code-hooks-multi-agent-observability](https://github.com/disler/claude-code-hooks-multi-agent-observability) is a well-built, widely used project, and everything here stands on it. This is not a replacement — it is my variant of it, and you may well prefer the original.
+
+So why make another one?
+
+- **To see what the AI actually does.** As more of our development runs through AI, more of it happens without us knowing how the agent works. Watching the real stream of prompts, tool calls, subagents and failures has become how I learn what the agent is doing — and how to work with it better. This dashboard is my tool for that.
+- **A desktop window, a cleaner look.** I personally don't like keeping a dashboard in a browser tab, so I made it a window of its own, restyled to what I find cleaner and easier to read.
+- **To share a good repository.** If this variant helps one more person find the original project, that alone was worth it.
+
+This project is unofficial and not affiliated with Anthropic or the original author.
 
 ## What it changes
 
@@ -91,6 +103,18 @@ Removes the hooks and shortcuts (history in `%LOCALAPPDATA%\ClaudeObservability`
 이 PC에서 도는 모든 Claude Code 세션을 창 하나에서 실시간으로 보는 도구입니다. **[disler/claude-code-hooks-multi-agent-observability](https://github.com/disler/claude-code-hooks-multi-agent-observability)** 를 Windows 데스크톱용으로 바꾼 것입니다.
 
 이 저장소에는 **원본 코드가 들어 있지 않습니다**. 설치 스크립트가 원작자의 GitHub에서 원본을 받아(시험한 버전에 고정), 여기 있는 변경분만 입힙니다. 원본 관측 시스템의 공은 모두 [disler](https://github.com/disler)에게 있습니다.
+
+### 감사의 말, 그리고 만든 이유
+
+먼저 [disler](https://github.com/disler)에게 감사드립니다. [claude-code-hooks-multi-agent-observability](https://github.com/disler/claude-code-hooks-multi-agent-observability)는 잘 만들어지고 많이 쓰이는 프로젝트이고, 여기 있는 모든 것은 그 위에 서 있습니다. 이 저장소는 원본을 대신하려는 것이 아니라 제 방식으로 고친 변형이며, 원본이 더 맞는 분도 많을 것입니다.
+
+그런데도 새로 만든 이유는 이렇습니다.
+
+- **AI가 실제로 무엇을 하는지 보기 위해서입니다.** AI로 개발하는 일이 늘면서, AI가 어떻게 동작하는지 모른 채 쓰는 방식도 많아졌습니다. 저는 실제 요청, 도구 호출, 서브에이전트, 실패가 흘러가는 모습을 직접 보면서 에이전트가 무엇을 하는지, 어떻게 함께 일해야 하는지를 배우고 있습니다. 이 대시보드는 그 학습 도구입니다.
+- **데스크톱 창과 더 깔끔한 화면.** 개인적으로 대시보드를 웹 브라우저 탭에 띄워 두는 것을 좋아하지 않아서, 독립된 창으로 만들고 제 기준에서 더 깔끔하고 읽기 쉬운 디자인으로 바꿨습니다.
+- **좋은 저장소를 알리고 싶어서입니다.** 이 변형을 통해 한 명이라도 더 원본 프로젝트를 알게 된다면 그것만으로 의미가 있습니다.
+
+이 프로젝트는 비공식이며 Anthropic이나 원작자와 관련이 없습니다.
 
 ### 바뀐 점
 
