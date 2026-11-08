@@ -79,6 +79,8 @@ You can ask Claude Code: *"Install https://github.com/BlueBird-0/multi-agent-obs
 
 Open **Claude Observability**. Sessions appear as soon as Claude Code does anything. Events are recorded **only while the window is open** — minimize it to keep recording. Data lives in `%LOCALAPPDATA%\ClaudeObservability`.
 
+You can pin it to the taskbar; the window opens on the pinned button. A pin made with an earlier version opens a second button instead: unpin it and pin it again.
+
 ## Uninstall
 
 ```powershell
@@ -171,6 +173,8 @@ Claude Code에 이렇게 부탁하면 됩니다: *"https://github.com/BlueBird-0
 ### 사용
 
 **Claude Observability**를 엽니다. Claude Code가 무언가를 하는 순간 세션이 나타납니다. 이벤트는 **창이 열려 있는 동안만** 기록됩니다. 계속 기록하려면 창을 최소화해 두세요. 기록은 `%LOCALAPPDATA%\ClaudeObservability`에 있습니다.
+
+작업표시줄에 고정해 쓸 수 있고, 창은 고정한 버튼 위에서 열립니다. 이전 버전으로 고정한 아이콘은 버튼이 하나 더 생기니, 고정을 풀었다가 다시 고정하세요.
 
 ### 제거
 

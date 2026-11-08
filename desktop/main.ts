@@ -8,7 +8,7 @@
 // The server runs inside the window process: closing the window stops it, and hooks then fail
 // silently (events are not recorded while the window is closed).
 import { existsSync, mkdirSync, readFileSync, writeFileSync, copyFileSync, rmSync, openSync, readSync, closeSync, statSync } from 'node:fs';
-import { dirname, join, resolve } from 'node:path';
+import { basename, dirname, join, resolve } from 'node:path';
 import { homedir, hostname } from 'node:os';
 
 const PORT = Number(process.env.SERVER_PORT || 4000);
@@ -18,6 +18,7 @@ const REPO_ROOT = resolve(import.meta.dir, '..', '..');
 const CLIENT_DIR = join(REPO_ROOT, 'apps', 'client');
 const WEB_DIR = join(CLIENT_DIR, 'dist');
 const DATA_DIR = join(process.env.LOCALAPPDATA || join(homedir(), 'AppData', 'Local'), 'ClaudeObservability');
+const PROFILE_DIR = join(DATA_DIR, 'webview-profile');
 const SETTINGS_PATH = join(homedir(), '.claude', 'settings.json');
 const HOOK_EVENTS = [
   'SessionStart', 'SessionEnd', 'UserPromptSubmit', 'PreToolUse', 'PostToolUse', 'PostToolUseFailure',
@@ -125,11 +126,10 @@ async function runWindow() {
     return; // no app window to wait on: keep serving until the process is ended
   }
 
-  const profileDir = join(DATA_DIR, 'webview-profile');
   Bun.spawn([
     edge,
     `--app=${URL_ROOT}/`,
-    `--user-data-dir=${profileDir}`,
+    `--user-data-dir=${PROFILE_DIR}`,
     '--window-size=1280,860',
     '--no-first-run',
     '--no-default-browser-check',
@@ -138,7 +138,7 @@ async function runWindow() {
 
   // msedge.exe hands the window to another process and returns at once, so its exit says nothing.
   // The profile's "lockfile" is held (delete-on-close) for as long as that browser instance lives.
-  const lockfile = join(profileDir, 'lockfile');
+  const lockfile = join(PROFILE_DIR, 'lockfile');
   const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
   for (let i = 0; i < 60 && !existsSync(lockfile); i++) await sleep(250);
   while (existsSync(lockfile)) await sleep(1000);
@@ -202,9 +202,72 @@ function shortcutPaths(): string[] {
   ];
 }
 
-function runPowerShell(script: string) {
+function runPowerShell(script: string): string {
   const r = Bun.spawnSync(['powershell', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', script]);
   if (r.exitCode !== 0) throw new Error(r.stderr.toString());
+  return r.stdout.toString();
+}
+
+// The taskbar groups a window with a pinned shortcut only when both carry the same AppUserModelID.
+// Edge names its --app window the way Chromium's ShellUtil::BuildAppUserModelId does: base id,
+// "host_path" of the URL, and "<user-data-dir name>.<profile>" kept to letters, digits and dots,
+// each part cut in the middle to fit a 64-character id. Port is not part of it.
+function edgeAppUserModelId(): string {
+  const url = new URL(`${URL_ROOT}/`);
+  const parts = ['MSEdge', `${url.hostname}_${url.pathname}`, `${basename(PROFILE_DIR)}.Default`.replace(/[^A-Za-z0-9.]/g, '')];
+  const max = Math.floor((64 - (parts.length - 1)) / parts.length);
+  return parts
+    .map(p => (p.length > max ? p.slice(0, Math.floor(max / 2)) + p.slice(p.length - Math.ceil(max / 2)) : p))
+    .join('.')
+    .replace(/ /g, '_');
+}
+
+// WScript.Shell cannot set System.AppUserModel.ID, so write it through the shortcut's property store.
+const SET_AUMID_CS = `
+using System; using System.Runtime.InteropServices;
+public static class LnkAumid {
+  [StructLayout(LayoutKind.Sequential, Pack = 4)] struct PROPERTYKEY { public Guid fmtid; public uint pid; }
+  [StructLayout(LayoutKind.Explicit)] struct PROPVARIANT { [FieldOffset(0)] public ushort vt; [FieldOffset(8)] public IntPtr p; [FieldOffset(16)] public IntPtr p2; }
+  [ComImport, Guid("886D8EEB-8CF2-4446-8D02-CDBA1DBDCF99"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+  interface IPropertyStore { void GetCount(out uint c); void GetAt(uint i, out PROPERTYKEY k);
+    void GetValue(ref PROPERTYKEY k, out PROPVARIANT v); void SetValue(ref PROPERTYKEY k, ref PROPVARIANT v); void Commit(); }
+  [DllImport("shell32.dll", CharSet = CharSet.Unicode)] static extern int SHGetPropertyStoreFromParsingName(string path, IntPtr pbc, int flags, ref Guid riid, [MarshalAs(UnmanagedType.Interface)] out IPropertyStore s);
+  static IPropertyStore Open(string lnk, int flags) {
+    Guid iid = new Guid("886D8EEB-8CF2-4446-8D02-CDBA1DBDCF99"); IPropertyStore s;
+    int hr = SHGetPropertyStoreFromParsingName(lnk, IntPtr.Zero, flags, ref iid, out s);
+    if (hr != 0) { throw new Exception("open " + lnk + ": 0x" + hr.ToString("X8")); }
+    return s;
+  }
+  static PROPERTYKEY Key() { PROPERTYKEY k = new PROPERTYKEY(); k.fmtid = new Guid("9F4C2855-9F79-4B39-A8D0-E1D42DE1D5F3"); k.pid = 5; return k; }
+  static string Get(string lnk) {
+    IPropertyStore s = Open(lnk, 0); PROPERTYKEY k = Key(); PROPVARIANT v;
+    try { s.GetValue(ref k, out v); return v.vt == 31 ? Marshal.PtrToStringUni(v.p) : ""; } finally { Marshal.ReleaseComObject(s); }
+  }
+  public static void Set(string lnk, string id) {
+    for (int attempt = 0; attempt < 5; attempt++) {
+      IPropertyStore s = Open(lnk, 2); PROPERTYKEY k = Key();
+      PROPVARIANT v = new PROPVARIANT(); v.vt = 31; v.p = Marshal.StringToCoTaskMemUni(id);
+      try { s.SetValue(ref k, ref v); s.Commit(); } finally { Marshal.FreeCoTaskMem(v.p); Marshal.ReleaseComObject(s); }
+      if (Get(lnk) == id) { return; }
+      System.Threading.Thread.Sleep(500); // Explorer may rewrite a desktop shortcut it is watching
+    }
+    throw new Exception("could not set AppUserModelID on " + lnk);
+  }
+}`;
+
+// Our shortcuts plus any taskbar pin of an older install that starts launch.vbs.
+function setShortcutAppIds(shortcuts: string[], vbs: string): string[] {
+  const appData = process.env.APPDATA || join(homedir(), 'AppData', 'Roaming');
+  const pinned = join(appData, 'Microsoft', 'Internet Explorer', 'Quick Launch', 'User Pinned', 'TaskBar');
+  const q = (s: string) => `'${s.replace(/'/g, "''")}'`;
+  const out = runPowerShell(
+    `Add-Type -TypeDefinition @"\n${SET_AUMID_CS}\n"@;` +
+    `$id=${q(edgeAppUserModelId())};$vbs=${q(vbs)};$sh=New-Object -ComObject WScript.Shell;` +
+    `$list=@(${shortcuts.map(q).join(',')});` +
+    `if(Test-Path ${q(pinned)}){$list+=@(Get-ChildItem ${q(pinned)} -Filter *.lnk | Where-Object { $sh.CreateShortcut($_.FullName).Arguments -like "*$vbs*" } | ForEach-Object FullName)};` +
+    `foreach($l in ($list | Select-Object -Unique)){[LnkAumid]::Set($l,$id);$l}`
+  );
+  return out.split(/\r?\n/).filter(Boolean);
 }
 
 function install() {
@@ -242,7 +305,8 @@ function install() {
   const vbs = join(DATA_DIR, 'launch.vbs');
   writeFileSync(vbs, `CreateObject("WScript.Shell").Run """${bun}"" ""${mainTs}""", 0, False\r\n`, 'utf8');
   const ico = writeIcon();
-  for (const lnk of shortcutPaths()) {
+  const shortcuts = shortcutPaths();
+  for (const lnk of shortcuts) {
     mkdirSync(dirname(lnk), { recursive: true });
     runPowerShell(
       `$s=(New-Object -ComObject WScript.Shell).CreateShortcut('${lnk.replace(/'/g, "''")}');` +
@@ -251,6 +315,9 @@ function install() {
       `$s.Description='Claude Code multi-agent observability dashboard';$s.Save()`
     );
   }
+  const tagged = setShortcutAppIds(shortcuts, vbs);
+  // Explorer keeps the id a pin had when it was pinned, so an older pin stays a separate button.
+  if (tagged.length > shortcuts.length) console.log('    Taskbar pin found: unpin it and pin it again, or the window opens as a second button.');
 
   console.log(`4/4 Done. Data folder: ${DATA_DIR}`);
   console.log(`Open "${APP_NAME}" from the desktop or Start menu. Hook source name: ${sourceApp}`);
