@@ -10,6 +10,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync, copyFileSync, rmSync, openSync, readSync, closeSync, statSync } from 'node:fs';
 import { basename, dirname, join, resolve } from 'node:path';
 import { homedir, hostname } from 'node:os';
+import { dlopen, FFIType, CFunction, ptr, read, type Pointer } from 'bun:ffi';
 
 const PORT = Number(process.env.SERVER_PORT || 4000);
 const URL_ROOT = `http://127.0.0.1:${PORT}`;
@@ -94,6 +95,108 @@ async function serverAlreadyUp(): Promise<boolean> {
   }
 }
 
+// ---------------------------------------------------------------- keep on top
+
+const WINDOW_PREFS = join(DATA_DIR, 'window.json');
+
+function readPrefs(): { topmost?: boolean } {
+  try { return JSON.parse(readFileSync(WINDOW_PREFS, 'utf8')); } catch { return {}; }
+}
+
+// Win32 calls for the Edge app window, loaded only when the window process needs them.
+let win32: ReturnType<typeof loadWin32> | null = null;
+function loadWin32() {
+  const user32 = dlopen('user32.dll', {
+    FindWindowExW: { args: [FFIType.ptr, FFIType.ptr, FFIType.ptr, FFIType.ptr], returns: FFIType.ptr },
+    IsWindowVisible: { args: [FFIType.ptr], returns: FFIType.bool },
+    GetWindowLongPtrW: { args: [FFIType.ptr, FFIType.i32], returns: FFIType.i64 },
+    SetWindowPos: { args: [FFIType.ptr, FFIType.i64, FFIType.i32, FFIType.i32, FFIType.i32, FFIType.i32, FFIType.u32], returns: FFIType.bool },
+  });
+  const shell32 = dlopen('shell32.dll', {
+    SHGetPropertyStoreForWindow: { args: [FFIType.ptr, FFIType.ptr, FFIType.ptr], returns: FFIType.i32 },
+  });
+  const ole32 = dlopen('ole32.dll', { PropVariantClear: { args: [FFIType.ptr], returns: FFIType.i32 } });
+  return { user32: user32.symbols, shell32: shell32.symbols, ole32: ole32.symbols };
+}
+
+function guid(text: string): Buffer {
+  const h = text.replace(/[{}-]/g, '');
+  const b = Buffer.alloc(16);
+  b.writeUInt32LE(parseInt(h.slice(0, 8), 16), 0);
+  b.writeUInt16LE(parseInt(h.slice(8, 12), 16), 4);
+  b.writeUInt16LE(parseInt(h.slice(12, 16), 16), 6);
+  Buffer.from(h.slice(16), 'hex').copy(b, 8);
+  return b;
+}
+
+const IID_PROPERTY_STORE = guid('886D8EEB-8CF2-4446-8D02-CDBA1DBDCF99');
+const PKEY_APP_USER_MODEL_ID = Buffer.concat([guid('9F4C2855-9F79-4B39-A8D0-E1D42DE1D5F3'), Buffer.from([5, 0, 0, 0])]);
+const EDGE_WINDOW_CLASS = Buffer.from('Chrome_WidgetWin_1\0', 'utf16le');
+
+// A window's AppUserModelID through its IPropertyStore (vtable: 2 Release, 5 GetValue).
+function windowAppId(hwnd: Pointer): string {
+  const { shell32, ole32 } = win32!;
+  const out = new BigUint64Array(1);
+  if (shell32.SHGetPropertyStoreForWindow(hwnd, ptr(IID_PROPERTY_STORE), ptr(out)) !== 0 || !out[0]) return '';
+  const store = Number(out[0]) as Pointer;
+  const vtbl = read.ptr(store, 0) as Pointer;
+  const getValue = CFunction({ ptr: read.ptr(vtbl, 5 * 8) as Pointer, args: [FFIType.ptr, FFIType.ptr, FFIType.ptr], returns: FFIType.i32 });
+  const release = CFunction({ ptr: read.ptr(vtbl, 2 * 8) as Pointer, args: [FFIType.ptr], returns: FFIType.u32 });
+  const pv = Buffer.alloc(24);
+  let id = '';
+  // Window stores answer S_FALSE (1) with the value filled in, so test for any success code.
+  if (getValue(store, ptr(PKEY_APP_USER_MODEL_ID), ptr(pv)) >= 0 && pv.readUInt16LE(0) === 31 /* VT_LPWSTR */) {
+    const s = read.ptr(ptr(pv), 8) as Pointer;
+    for (let i = 0; i < 256; i++) {
+      const c = read.u16(s, i * 2);
+      if (c === 0) break;
+      id += String.fromCharCode(c);
+    }
+    ole32.PropVariantClear(ptr(pv));
+  }
+  release(store);
+  getValue.close(); release.close();
+  return id;
+}
+
+// Visible Edge windows that belong to this dashboard (same id the shortcuts carry).
+function dashboardWindows(): Pointer[] {
+  const { user32 } = win32!;
+  const appId = edgeAppUserModelId();
+  const found: Pointer[] = [];
+  let h: Pointer | null = null;
+  while ((h = user32.FindWindowExW(null, h, ptr(EDGE_WINDOW_CLASS), null))) {
+    if (user32.IsWindowVisible(h) && windowAppId(h) === appId) found.push(h);
+  }
+  return found;
+}
+
+// Sets the state on windows that differ; returns how many dashboard windows exist.
+function applyTopmost(on: boolean): number {
+  const { user32 } = win32!;
+  const HWND_TOPMOST = -1, HWND_NOTOPMOST = -2, SWP_NOSIZE = 0x1, SWP_NOMOVE = 0x2, SWP_NOACTIVATE = 0x10;
+  const GWL_EXSTYLE = -20, WS_EX_TOPMOST = 0x8n;
+  const windows = dashboardWindows();
+  for (const h of windows) {
+    const isTop = (BigInt(user32.GetWindowLongPtrW(h, GWL_EXSTYLE)) & WS_EX_TOPMOST) !== 0n;
+    if (isTop !== on) user32.SetWindowPos(h, on ? HWND_TOPMOST : HWND_NOTOPMOST, 0, 0, 0, 0, SWP_NOSIZE | SWP_NOMOVE | SWP_NOACTIVATE);
+  }
+  return windows.length;
+}
+
+// Called by the server's /desktop/topmost route (apps/server/src/index.ts).
+function exposeWindowControls() {
+  win32 ??= loadWin32();
+  (globalThis as any).__observabilityDesktop = {
+    getTopmost: () => !!readPrefs().topmost,
+    setTopmost: (on: boolean) => {
+      writeFileSync(WINDOW_PREFS, JSON.stringify({ ...readPrefs(), topmost: on }) + '\n', 'utf8');
+      applyTopmost(on);
+      return on;
+    },
+  };
+}
+
 function findEdge(): string | null {
   const candidates = [
     join(process.env['ProgramFiles(x86)'] || 'C:\\Program Files (x86)', 'Microsoft', 'Edge', 'Application', 'msedge.exe'),
@@ -115,6 +218,7 @@ async function runWindow() {
 
   // Another window (or a dev server) already owns the port: just open one more window.
   const ownServer = !(await serverAlreadyUp());
+  exposeWindowControls();
   if (ownServer) {
     await import('../server/src/index.ts');
   }
@@ -141,7 +245,11 @@ async function runWindow() {
   const lockfile = join(PROFILE_DIR, 'lockfile');
   const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
   for (let i = 0; i < 60 && !existsSync(lockfile); i++) await sleep(250);
-  while (existsSync(lockfile)) await sleep(1000);
+  // Keep on top: applied once the window shows up, and again if Edge drops it while activating.
+  while (existsSync(lockfile)) {
+    if (readPrefs().topmost) applyTopmost(true);
+    await sleep(1000);
+  }
   process.exit(0);
 }
 
