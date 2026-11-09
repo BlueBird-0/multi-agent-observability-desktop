@@ -24,18 +24,18 @@ This project is unofficial and not affiliated with Anthropic or the original aut
 
 ## What it changes
 
-- **Own window**: the dashboard opens in an Edge app-mode window (no address bar). The event server runs inside it; close the window and everything stops.
+- **Own window**: the dashboard opens in its own window (WebView2, the Edge engine built into Windows) with no title bar: the header is the title bar. Drag it to move the window, double-click it to maximize, and use the minimize / maximize / close buttons at its right end. The event server runs inside the window; close it and everything stops.
 - **No Python**: hooks are sent by a small Bun script instead of `uv` + Python, and run asynchronously, so Claude Code never waits on them.
 - **Per-session lanes, automatic**: every active session gets its own graph row; the combined "Live Activity Pulse" opens only while nothing is running.
 - **Cleaner look**: thin header, compact chips, rounded bars stacked by session color, tool icons stacked on light badges from the bottom of each bar (readable on dark themes), a colorblind-checked session palette, dark theme by default.
 - **Clear follow mode**: a "Live" pill while the event list follows new events, "Latest" once you scroll away (click to jump back).
-- **Keep on top**: the pin button in the header, or right-click the header, keeps the window above other windows. The choice is kept for the next launch.
+- **Keep on top**: the pin button in the header, or **Keep on top** in the menu you get by right-clicking the header, keeps the window above other windows. It, and the window size and place, are kept for the next launch.
 
 ![Default view while sessions are running: one lane per session](docs/screenshot-lanes.png)
 
 ## Requirements
 
-Windows 10/11, [Git](https://git-scm.com/download/win), and [Bun](https://bun.sh) (the installer installs Bun with `npm` if Node.js is present). Microsoft Edge is used for the window (falls back to your default browser).
+Windows 10/11, [Git](https://git-scm.com/download/win), and [Bun](https://bun.sh) (the installer installs Bun with `npm` if Node.js is present). The window needs the WebView2 Runtime and .NET Framework 4.x, both part of Windows 11 and of current Windows 10. Without them the dashboard opens in an Edge app window (with its title bar) or your default browser.
 
 ## Install
 
@@ -62,7 +62,7 @@ Options: `-InstallDir <path>` (default `%USERPROFILE%\claude-observability`), `-
 1. clones the original project into the install folder and checks out the tested commit,
 2. applies `patches/observability-desktop.patch` and copies `desktop/` to `apps/desktop`,
 3. runs `bun install` for the server and client,
-4. runs `bun apps/desktop/main.ts --install`, which builds the dashboard, adds 12 async hooks to `~/.claude/settings.json` (a timestamped backup is kept; older hooks from the original Python sender are replaced) and creates **Claude Observability** shortcuts on the desktop and in the Start menu.
+4. runs `bun apps/desktop/main.ts --install`, which builds the dashboard, builds the window (downloads the WebView2 SDK, a pinned version checked by SHA-256, from nuget.org into `%LOCALAPPDATA%\ClaudeObservability\host` and compiles `desktop/host/ObservabilityWindow.cs` with the C# compiler that comes with Windows), adds 12 async hooks to `~/.claude/settings.json` (a timestamped backup is kept; older hooks from the original Python sender are replaced) and creates **Claude Observability** shortcuts on the desktop and in the Start menu.
 
 ### Installing with Claude Code (or another AI agent)
 
@@ -71,7 +71,8 @@ You can ask Claude Code: *"Install https://github.com/BlueBird-0/multi-agent-obs
 - **Run the installer with the PowerShell tool, not a sandboxed Bash tool.** Claude Code's Bash sandbox on Windows virtualizes `%LOCALAPPDATA%`, so files the installer writes there (launcher script, icon) are invisible to Windows and the desktop shortcut will not start.
 - Command: the one-line install above (or `install.ps1` from a clone with `-ExecutionPolicy Bypass`). Pass `-SourceApp <name>` if the user wants a specific label.
 - The installer **edits `~/.claude/settings.json`**: it adds 12 async hooks and keeps a timestamped backup. Tell the user before running it. It only replaces hooks that point to `apps/desktop/main.ts` or `send_event.py`; other hooks are left alone.
-- Requirements: Git must be installed; Bun is installed with npm when Node.js exists. If neither Bun nor Node.js is present, ask the user to install one rather than guessing.
+- Requirements: Git must be installed; Bun is installed with npm when Node.js exists. If neither Bun nor Node.js is present, ask the user to install one rather than guessing. The installer downloads from github.com and nuget.org.
+- Close the dashboard window before reinstalling: the window program cannot be rebuilt while it runs (the installer says so and the old window keeps working).
 - Verify (in PowerShell): `Test-Path "$env:LOCALAPPDATA\ClaudeObservability\launch.vbs"` is `True`, and a **Claude Observability** shortcut exists on the desktop. Opening it should make `http://127.0.0.1:4000/events/recent?limit=1` answer while the window is open.
 - New hooks take effect in Claude Code sessions immediately; nothing needs restarting.
 - Do not run `--uninstall` unless the user asks.
@@ -85,7 +86,7 @@ You can pin it to the taskbar; the window opens on the pinned button. A pin made
 ## Uninstall
 
 ```powershell
-cmd /c bun "%USERPROFILE%\claude-observabilitypps\desktop\main.ts" --uninstall
+cmd /c bun "%USERPROFILE%\claude-observability\apps\desktop\main.ts" --uninstall
 ```
 
 Removes the hooks and shortcuts (history in `%LOCALAPPDATA%\ClaudeObservability` is kept; delete that folder to remove it), then delete the install folder.
@@ -96,7 +97,8 @@ Removes the hooks and shortcuts (history in `%LOCALAPPDATA%\ClaudeObservability`
 |---|---|
 | `install.ps1` | Installer |
 | `patches/observability-desktop.patch` | Changes to the original client and server |
-| `desktop/main.ts` | Window launcher, hook sender, install/uninstall |
+| `desktop/main.ts` | Launcher (server + window), hook sender, install/uninstall |
+| `desktop/host/ObservabilityWindow.cs` | The window: WebView2 without a title bar, keep on top, size and place memory |
 | `desktop/assets/` | App icon (PNG and its SVG source page) |
 
 ---
@@ -121,18 +123,18 @@ Removes the hooks and shortcuts (history in `%LOCALAPPDATA%\ClaudeObservability`
 
 ### 바뀐 점
 
-- **자체 창**: 대시보드가 Edge 앱 모드 창(주소창 없음)으로 뜹니다. 이벤트 서버가 창과 함께 돌고, 창을 닫으면 모두 종료됩니다.
+- **자체 창**: 대시보드가 타이틀바 없는 자체 창(Windows에 들어 있는 Edge 엔진인 WebView2)으로 뜹니다. 상단 줄이 타이틀바 역할을 합니다. 끌면 창이 움직이고, 더블클릭하면 최대화되며, 오른쪽 끝에 최소화·최대화·닫기 버튼이 있습니다. 이벤트 서버가 창과 함께 돌고, 창을 닫으면 모두 종료됩니다.
 - **Python 불필요**: 훅을 `uv` + Python 대신 Bun 스크립트로 보내고, 백그라운드로 돌아 Claude Code를 기다리게 하지 않습니다.
 - **세션별 그래프 자동 표시**: 활동 중인 세션마다 그래프 한 줄이 생기고, 전체 그래프(Live Activity Pulse)는 아무 세션도 돌지 않을 때만 펼쳐집니다.
 - **깔끔한 디자인**: 얇은 상단 줄, 작은 칩, 세션 색으로 쌓은 둥근 막대, 막대 아래쪽부터 흰 배지 위에 쌓은 도구 아이콘(다크 테마에서도 잘 보임), 색약을 고려한 세션 색, 기본 다크 테마.
 - **알기 쉬운 자동 스크롤**: 이벤트 목록이 새 이벤트를 따라가는 동안은 "Live", 위로 스크롤하면 "Latest"로 바뀝니다(누르면 최신으로 이동).
-- **맨 위에 고정**: 상단 줄의 핀 버튼이나 상단 줄 우클릭 메뉴로 창을 다른 창 위에 고정합니다. 다음 실행 때도 유지됩니다.
+- **맨 위에 고정**: 상단 줄의 핀 버튼이나, 상단 줄을 우클릭해 나오는 메뉴의 **Keep on top**으로 창을 다른 창 위에 고정합니다. 이 설정과 창 크기·위치는 다음 실행 때도 유지됩니다.
 
 화면 예시는 위 영어 안내의 스크린샷을 보세요(예시 데이터: 두 대의 PC에서 도는 세션 3개).
 
 ### 필요한 것
 
-Windows 10/11, [Git](https://git-scm.com/download/win), [Bun](https://bun.sh)(Node.js가 있으면 설치 스크립트가 `npm`으로 Bun을 설치). 창은 Microsoft Edge로 띄웁니다(없으면 기본 브라우저).
+Windows 10/11, [Git](https://git-scm.com/download/win), [Bun](https://bun.sh)(Node.js가 있으면 설치 스크립트가 `npm`으로 Bun을 설치). 창에는 WebView2 Runtime과 .NET Framework 4.x가 필요한데, 둘 다 Windows 11과 최신 Windows 10에 들어 있습니다. 없으면 Edge 앱 창(타이틀바 있음)이나 기본 브라우저로 뜹니다.
 
 ### 설치
 
@@ -158,7 +160,7 @@ powershell -ExecutionPolicy Bypass -File install.ps1
 1. 원본 프로젝트를 설치 폴더에 받고 시험한 커밋으로 맞춥니다.
 2. `patches/observability-desktop.patch`를 적용하고 `desktop/`을 `apps/desktop`으로 복사합니다.
 3. 서버와 화면의 패키지를 받습니다(`bun install`).
-4. `bun apps/desktop/main.ts --install`을 실행합니다. 화면을 빌드하고, `~/.claude/settings.json`에 백그라운드 훅 12개를 넣고(시각이 붙은 백업을 남기며, 원본 Python 훅은 교체), 바탕화면과 시작 메뉴에 **Claude Observability** 바로가기를 만듭니다.
+4. `bun apps/desktop/main.ts --install`을 실행합니다. 화면을 빌드하고, 창 프로그램을 만들고(nuget.org에서 버전을 고정한 WebView2 SDK를 받아 SHA-256으로 확인한 뒤 `%LOCALAPPDATA%\ClaudeObservability\host`에 풀고, Windows에 들어 있는 C# 컴파일러로 `desktop/host/ObservabilityWindow.cs`를 컴파일), `~/.claude/settings.json`에 백그라운드 훅 12개를 넣고(시각이 붙은 백업을 남기며, 원본 Python 훅은 교체), 바탕화면과 시작 메뉴에 **Claude Observability** 바로가기를 만듭니다.
 
 ### Claude Code(AI 에이전트)로 설치하기
 
@@ -167,7 +169,8 @@ Claude Code에 이렇게 부탁하면 됩니다: *"https://github.com/BlueBird-0
 - **설치는 PowerShell 도구로 실행합니다. 샌드박스가 걸린 Bash 도구로 실행하지 않습니다.** Windows에서 Claude Code의 Bash 샌드박스는 `%LOCALAPPDATA%`를 가상화하기 때문에, 설치가 그곳에 만드는 파일(실행 스크립트, 아이콘)이 Windows에서 보이지 않고 바탕화면 바로가기가 실행되지 않습니다.
 - 명령: 위의 한 줄 설치(또는 저장소를 받은 뒤 `-ExecutionPolicy Bypass`로 `install.ps1`). 사용자가 원하는 PC 이름이 있으면 `-SourceApp <이름>`을 붙입니다.
 - 설치는 **`~/.claude/settings.json`을 수정합니다**(백그라운드 훅 12개 추가, 시각이 붙은 백업 보관). 실행 전에 사용자에게 알립니다. `apps/desktop/main.ts`나 `send_event.py`를 가리키는 훅만 교체하고, 다른 훅은 건드리지 않습니다.
-- 필요한 것: Git은 설치되어 있어야 합니다. Bun은 Node.js가 있으면 npm으로 설치됩니다. Bun도 Node.js도 없으면 추측하지 말고 사용자에게 설치를 부탁합니다.
+- 필요한 것: Git은 설치되어 있어야 합니다. Bun은 Node.js가 있으면 npm으로 설치됩니다. Bun도 Node.js도 없으면 추측하지 말고 사용자에게 설치를 부탁합니다. 설치는 github.com과 nuget.org에서 내려받습니다.
+- 다시 설치하기 전에 대시보드 창을 닫습니다. 창 프로그램이 실행 중이면 다시 빌드할 수 없습니다(설치가 그렇게 알려 주고, 기존 창은 그대로 동작합니다).
 - 확인(PowerShell에서): `Test-Path "$env:LOCALAPPDATA\ClaudeObservability\launch.vbs"`가 `True`이고, 바탕화면에 **Claude Observability** 바로가기가 있어야 합니다. 바로가기로 창을 열면 그동안 `http://127.0.0.1:4000/events/recent?limit=1`이 응답해야 합니다.
 - 새 훅은 Claude Code 세션에 바로 적용됩니다. 다시 시작할 것은 없습니다.
 - 사용자가 요청하지 않으면 `--uninstall`은 실행하지 않습니다.
@@ -181,7 +184,7 @@ Claude Code에 이렇게 부탁하면 됩니다: *"https://github.com/BlueBird-0
 ### 제거
 
 ```powershell
-cmd /c bun "%USERPROFILE%\claude-observabilitypps\desktop\main.ts" --uninstall
+cmd /c bun "%USERPROFILE%\claude-observability\apps\desktop\main.ts" --uninstall
 ```
 
 훅과 바로가기를 지웁니다. 기록은 남으니 지우려면 `%LOCALAPPDATA%\ClaudeObservability` 폴더를 지우고, 설치 폴더도 지우면 됩니다.

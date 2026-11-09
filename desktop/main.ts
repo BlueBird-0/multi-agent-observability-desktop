@@ -1,4 +1,5 @@
-// Windows desktop mode for the observability dashboard, run with Bun (no Python, no compiled exe).
+// Windows desktop mode for the observability dashboard, run with Bun (no Python). The window is a small
+// WebView2 program compiled on this PC at install time (desktop/host); without it, an Edge app window.
 //
 //   bun apps/desktop/main.ts                 open the dashboard window (starts the server if needed)
 //   bun apps/desktop/main.ts --install       build the client, add Claude Code hooks, create shortcuts
@@ -8,9 +9,9 @@
 // The server runs inside the window process: closing the window stops it, and hooks then fail
 // silently (events are not recorded while the window is closed).
 import { existsSync, mkdirSync, readFileSync, writeFileSync, copyFileSync, rmSync, openSync, readSync, closeSync, statSync } from 'node:fs';
-import { basename, dirname, join, resolve } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { homedir, hostname } from 'node:os';
-import { dlopen, FFIType, CFunction, ptr, read, type Pointer } from 'bun:ffi';
+import { createHash } from 'node:crypto';
 
 const PORT = Number(process.env.SERVER_PORT || 4000);
 const URL_ROOT = `http://127.0.0.1:${PORT}`;
@@ -19,7 +20,12 @@ const REPO_ROOT = resolve(import.meta.dir, '..', '..');
 const CLIENT_DIR = join(REPO_ROOT, 'apps', 'client');
 const WEB_DIR = join(CLIENT_DIR, 'dist');
 const DATA_DIR = join(process.env.LOCALAPPDATA || join(homedir(), 'AppData', 'Local'), 'ClaudeObservability');
-const PROFILE_DIR = join(DATA_DIR, 'webview-profile');
+const PROFILE_DIR = join(DATA_DIR, 'webview-profile'); // Edge fallback window only
+// Window host: desktop/host/ObservabilityWindow.cs compiled at install against a pinned WebView2 SDK.
+const HOST_DIR = join(DATA_DIR, 'host');
+const HOST_EXE = join(HOST_DIR, 'ObservabilityWindow.exe');
+const WEBVIEW2_SDK = { version: '1.0.4258.31', sha256: '56f7f4b8bf9aee4b8efefbbdd4f67d5f74ebd1b100ed0806da71bf76af481aa9' };
+const APP_ID = 'MultiAgentObservability.Desktop'; // taskbar id shared by the window and its shortcuts
 const SETTINGS_PATH = join(homedir(), '.claude', 'settings.json');
 const HOOK_EVENTS = [
   'SessionStart', 'SessionEnd', 'UserPromptSubmit', 'PreToolUse', 'PostToolUse', 'PostToolUseFailure',
@@ -95,108 +101,6 @@ async function serverAlreadyUp(): Promise<boolean> {
   }
 }
 
-// ---------------------------------------------------------------- keep on top
-
-const WINDOW_PREFS = join(DATA_DIR, 'window.json');
-
-function readPrefs(): { topmost?: boolean } {
-  try { return JSON.parse(readFileSync(WINDOW_PREFS, 'utf8')); } catch { return {}; }
-}
-
-// Win32 calls for the Edge app window, loaded only when the window process needs them.
-let win32: ReturnType<typeof loadWin32> | null = null;
-function loadWin32() {
-  const user32 = dlopen('user32.dll', {
-    FindWindowExW: { args: [FFIType.ptr, FFIType.ptr, FFIType.ptr, FFIType.ptr], returns: FFIType.ptr },
-    IsWindowVisible: { args: [FFIType.ptr], returns: FFIType.bool },
-    GetWindowLongPtrW: { args: [FFIType.ptr, FFIType.i32], returns: FFIType.i64 },
-    SetWindowPos: { args: [FFIType.ptr, FFIType.i64, FFIType.i32, FFIType.i32, FFIType.i32, FFIType.i32, FFIType.u32], returns: FFIType.bool },
-  });
-  const shell32 = dlopen('shell32.dll', {
-    SHGetPropertyStoreForWindow: { args: [FFIType.ptr, FFIType.ptr, FFIType.ptr], returns: FFIType.i32 },
-  });
-  const ole32 = dlopen('ole32.dll', { PropVariantClear: { args: [FFIType.ptr], returns: FFIType.i32 } });
-  return { user32: user32.symbols, shell32: shell32.symbols, ole32: ole32.symbols };
-}
-
-function guid(text: string): Buffer {
-  const h = text.replace(/[{}-]/g, '');
-  const b = Buffer.alloc(16);
-  b.writeUInt32LE(parseInt(h.slice(0, 8), 16), 0);
-  b.writeUInt16LE(parseInt(h.slice(8, 12), 16), 4);
-  b.writeUInt16LE(parseInt(h.slice(12, 16), 16), 6);
-  Buffer.from(h.slice(16), 'hex').copy(b, 8);
-  return b;
-}
-
-const IID_PROPERTY_STORE = guid('886D8EEB-8CF2-4446-8D02-CDBA1DBDCF99');
-const PKEY_APP_USER_MODEL_ID = Buffer.concat([guid('9F4C2855-9F79-4B39-A8D0-E1D42DE1D5F3'), Buffer.from([5, 0, 0, 0])]);
-const EDGE_WINDOW_CLASS = Buffer.from('Chrome_WidgetWin_1\0', 'utf16le');
-
-// A window's AppUserModelID through its IPropertyStore (vtable: 2 Release, 5 GetValue).
-function windowAppId(hwnd: Pointer): string {
-  const { shell32, ole32 } = win32!;
-  const out = new BigUint64Array(1);
-  if (shell32.SHGetPropertyStoreForWindow(hwnd, ptr(IID_PROPERTY_STORE), ptr(out)) !== 0 || !out[0]) return '';
-  const store = Number(out[0]) as Pointer;
-  const vtbl = read.ptr(store, 0) as Pointer;
-  const getValue = CFunction({ ptr: read.ptr(vtbl, 5 * 8) as Pointer, args: [FFIType.ptr, FFIType.ptr, FFIType.ptr], returns: FFIType.i32 });
-  const release = CFunction({ ptr: read.ptr(vtbl, 2 * 8) as Pointer, args: [FFIType.ptr], returns: FFIType.u32 });
-  const pv = Buffer.alloc(24);
-  let id = '';
-  // Window stores answer S_FALSE (1) with the value filled in, so test for any success code.
-  if (getValue(store, ptr(PKEY_APP_USER_MODEL_ID), ptr(pv)) >= 0 && pv.readUInt16LE(0) === 31 /* VT_LPWSTR */) {
-    const s = read.ptr(ptr(pv), 8) as Pointer;
-    for (let i = 0; i < 256; i++) {
-      const c = read.u16(s, i * 2);
-      if (c === 0) break;
-      id += String.fromCharCode(c);
-    }
-    ole32.PropVariantClear(ptr(pv));
-  }
-  release(store);
-  getValue.close(); release.close();
-  return id;
-}
-
-// Visible Edge windows that belong to this dashboard (same id the shortcuts carry).
-function dashboardWindows(): Pointer[] {
-  const { user32 } = win32!;
-  const appId = edgeAppUserModelId();
-  const found: Pointer[] = [];
-  let h: Pointer | null = null;
-  while ((h = user32.FindWindowExW(null, h, ptr(EDGE_WINDOW_CLASS), null))) {
-    if (user32.IsWindowVisible(h) && windowAppId(h) === appId) found.push(h);
-  }
-  return found;
-}
-
-// Sets the state on windows that differ; returns how many dashboard windows exist.
-function applyTopmost(on: boolean): number {
-  const { user32 } = win32!;
-  const HWND_TOPMOST = -1, HWND_NOTOPMOST = -2, SWP_NOSIZE = 0x1, SWP_NOMOVE = 0x2, SWP_NOACTIVATE = 0x10;
-  const GWL_EXSTYLE = -20, WS_EX_TOPMOST = 0x8n;
-  const windows = dashboardWindows();
-  for (const h of windows) {
-    const isTop = (BigInt(user32.GetWindowLongPtrW(h, GWL_EXSTYLE)) & WS_EX_TOPMOST) !== 0n;
-    if (isTop !== on) user32.SetWindowPos(h, on ? HWND_TOPMOST : HWND_NOTOPMOST, 0, 0, 0, 0, SWP_NOSIZE | SWP_NOMOVE | SWP_NOACTIVATE);
-  }
-  return windows.length;
-}
-
-// Called by the server's /desktop/topmost route (apps/server/src/index.ts).
-function exposeWindowControls() {
-  win32 ??= loadWin32();
-  (globalThis as any).__observabilityDesktop = {
-    getTopmost: () => !!readPrefs().topmost,
-    setTopmost: (on: boolean) => {
-      writeFileSync(WINDOW_PREFS, JSON.stringify({ ...readPrefs(), topmost: on }) + '\n', 'utf8');
-      applyTopmost(on);
-      return on;
-    },
-  };
-}
-
 function findEdge(): string | null {
   const candidates = [
     join(process.env['ProgramFiles(x86)'] || 'C:\\Program Files (x86)', 'Microsoft', 'Edge', 'Application', 'msedge.exe'),
@@ -216,11 +120,19 @@ async function runWindow() {
   process.env.OBS_DB_PATH = join(DATA_DIR, 'events.db');
   process.env.OBS_STATIC_DIR = WEB_DIR;
 
-  // Another window (or a dev server) already owns the port: just open one more window.
+  // Another window (or a dev server) already owns the port: just open the window.
   const ownServer = !(await serverAlreadyUp());
-  exposeWindowControls();
   if (ownServer) {
     await import('../server/src/index.ts');
+  }
+
+  // Our own window (built by --install); a second one only brings the open window forward.
+  if (existsSync(HOST_EXE)) {
+    const host = Bun.spawn([HOST_EXE, '--url', `${URL_ROOT}/`, '--data', DATA_DIR, '--prefs', join(DATA_DIR, 'window.json'),
+      '--icon', join(DATA_DIR, 'icon.ico'), '--app-id', APP_ID], { stdout: 'ignore', stderr: 'ignore' });
+    const code = await host.exited;
+    if (code !== 3 || !ownServer) process.exit(0);
+    // 3: no WebView2 Runtime on this PC, so fall back to an Edge app window.
   }
 
   const edge = findEdge();
@@ -245,11 +157,7 @@ async function runWindow() {
   const lockfile = join(PROFILE_DIR, 'lockfile');
   const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
   for (let i = 0; i < 60 && !existsSync(lockfile); i++) await sleep(250);
-  // Keep on top: applied once the window shows up, and again if Edge drops it while activating.
-  while (existsSync(lockfile)) {
-    if (readPrefs().topmost) applyTopmost(true);
-    await sleep(1000);
-  }
+  while (existsSync(lockfile)) await sleep(1000);
   process.exit(0);
 }
 
@@ -316,20 +224,6 @@ function runPowerShell(script: string): string {
   return r.stdout.toString();
 }
 
-// The taskbar groups a window with a pinned shortcut only when both carry the same AppUserModelID.
-// Edge names its --app window the way Chromium's ShellUtil::BuildAppUserModelId does: base id,
-// "host_path" of the URL, and "<user-data-dir name>.<profile>" kept to letters, digits and dots,
-// each part cut in the middle to fit a 64-character id. Port is not part of it.
-function edgeAppUserModelId(): string {
-  const url = new URL(`${URL_ROOT}/`);
-  const parts = ['MSEdge', `${url.hostname}_${url.pathname}`, `${basename(PROFILE_DIR)}.Default`.replace(/[^A-Za-z0-9.]/g, '')];
-  const max = Math.floor((64 - (parts.length - 1)) / parts.length);
-  return parts
-    .map(p => (p.length > max ? p.slice(0, Math.floor(max / 2)) + p.slice(p.length - Math.ceil(max / 2)) : p))
-    .join('.')
-    .replace(/ /g, '_');
-}
-
 // WScript.Shell cannot set System.AppUserModel.ID, so write it through the shortcut's property store.
 const SET_AUMID_CS = `
 using System; using System.Runtime.InteropServices;
@@ -370,7 +264,7 @@ function setShortcutAppIds(shortcuts: string[], vbs: string): string[] {
   const q = (s: string) => `'${s.replace(/'/g, "''")}'`;
   const out = runPowerShell(
     `Add-Type -TypeDefinition @"\n${SET_AUMID_CS}\n"@;` +
-    `$id=${q(edgeAppUserModelId())};$vbs=${q(vbs)};$sh=New-Object -ComObject WScript.Shell;` +
+    `$id=${q(APP_ID)};$vbs=${q(vbs)};$sh=New-Object -ComObject WScript.Shell;` +
     `$list=@(${shortcuts.map(q).join(',')});` +
     `if(Test-Path ${q(pinned)}){$list+=@(Get-ChildItem ${q(pinned)} -Filter *.lnk | Where-Object { $sh.CreateShortcut($_.FullName).Arguments -like "*$vbs*" } | ForEach-Object FullName)};` +
     `foreach($l in ($list | Select-Object -Unique)){[LnkAumid]::Set($l,$id);$l}`
@@ -378,12 +272,45 @@ function setShortcutAppIds(shortcuts: string[], vbs: string): string[] {
   return out.split(/\r?\n/).filter(Boolean);
 }
 
-function install() {
+// Compiles desktop/host/ObservabilityWindow.cs with the .NET Framework C# compiler that ships with Windows,
+// against the WebView2 SDK from nuget.org (pinned version, checked by SHA-256). Throws if it cannot.
+async function buildHost(ico: string) {
+  const windir = process.env.WINDIR || 'C:\\Windows';
+  const csc = ['Framework64', 'Framework'].map(f => join(windir, 'Microsoft.NET', f, 'v4.0.30319', 'csc.exe')).find(p => existsSync(p));
+  if (!csc) throw new Error('No .NET Framework C# compiler (csc.exe) found.');
+
+  const { version, sha256 } = WEBVIEW2_SDK;
+  const sdk = join(HOST_DIR, `webview2-sdk-${version}`);
+  if (!existsSync(join(sdk, 'lib', 'net462', 'Microsoft.Web.WebView2.WinForms.dll'))) {
+    const res = await fetch(`https://api.nuget.org/v3-flatcontainer/microsoft.web.webview2/${version}/microsoft.web.webview2.${version}.nupkg`);
+    if (!res.ok) throw new Error(`WebView2 SDK download failed: HTTP ${res.status}`);
+    const pkg = Buffer.from(await res.arrayBuffer());
+    if (createHash('sha256').update(pkg).digest('hex') !== sha256) throw new Error('WebView2 SDK download does not match the pinned SHA-256');
+    mkdirSync(sdk, { recursive: true });
+    const nupkg = join(sdk, 'package.nupkg');
+    writeFileSync(nupkg, pkg);
+    const tar = Bun.spawnSync(['tar', '-xf', nupkg, '-C', sdk]); // Windows tar reads zip files
+    rmSync(nupkg, { force: true });
+    if (tar.exitCode !== 0) throw new Error(`could not unpack the WebView2 SDK: ${tar.stderr.toString()}`);
+  }
+
+  const lib = join(sdk, 'lib', 'net462');
+  const arch = process.arch === 'arm64' ? 'win-arm64' : process.arch === 'ia32' ? 'win-x86' : 'win-x64';
+  const r = Bun.spawnSync([csc, '/nologo', '/target:winexe', '/optimize', `/out:${HOST_EXE}`, `/win32icon:${ico}`,
+    `/r:${join(lib, 'Microsoft.Web.WebView2.Core.dll')}`, `/r:${join(lib, 'Microsoft.Web.WebView2.WinForms.dll')}`,
+    '/r:System.Windows.Forms.dll', '/r:System.Drawing.dll', '/r:System.Web.Extensions.dll',
+    join(import.meta.dir, 'host', 'ObservabilityWindow.cs')]);
+  if (r.exitCode !== 0) throw new Error(`window build failed:\n${r.stdout.toString()}${r.stderr.toString()}`);
+  for (const dll of ['Microsoft.Web.WebView2.Core.dll', 'Microsoft.Web.WebView2.WinForms.dll']) copyFileSync(join(lib, dll), join(HOST_DIR, dll));
+  copyFileSync(join(sdk, 'runtimes', arch, 'native', 'WebView2Loader.dll'), join(HOST_DIR, 'WebView2Loader.dll'));
+}
+
+async function install() {
   const bun = process.execPath;
   const sourceApp = argValue('--source-app', hostname());
   mkdirSync(DATA_DIR, { recursive: true });
 
-  console.log('1/4 Building the dashboard (vite build)...');
+  console.log('1/5 Building the dashboard (vite build)...');
   const build = Bun.spawnSync([bun, 'x', 'vite', 'build'], { cwd: CLIENT_DIR, stdout: 'inherit', stderr: 'inherit' });
   if (build.exitCode !== 0) throw new Error('vite build failed (did you run "bun install" in apps/client and apps/server?)');
   // App window has its own profile: start it in the dark theme until the user picks another.
@@ -394,7 +321,17 @@ function install() {
   writeFileSync(index, html, 'utf8');
   copyFileSync(join(import.meta.dir, 'assets', 'icon-256.png'), join(WEB_DIR, 'favicon.png'));
 
-  console.log(`2/4 Adding Claude Code hooks to ${SETTINGS_PATH} (backup kept)...`);
+  console.log(`2/5 Building the window (WebView2 SDK ${WEBVIEW2_SDK.version} from nuget.org, compiled on this PC)...`);
+  mkdirSync(HOST_DIR, { recursive: true });
+  const ico = writeIcon();
+  try {
+    await buildHost(ico);
+  } catch (e) {
+    // Most often the window is still open (its exe is locked): close it and install again.
+    console.warn(`    ${(e as Error).message}\n    The window could not be built; until it is, an Edge app window opens instead.`);
+  }
+
+  console.log(`3/5 Adding Claude Code hooks to ${SETTINGS_PATH} (backup kept)...`);
   const settings = readSettings();
   stripObservabilityHooks(settings);
   settings.hooks ??= {};
@@ -408,11 +345,10 @@ function install() {
   }
   writeSettings(settings);
 
-  console.log('3/4 Creating desktop and Start menu shortcuts...');
+  console.log('4/5 Creating desktop and Start menu shortcuts...');
   // A tiny VBScript starts Bun without a console window.
   const vbs = join(DATA_DIR, 'launch.vbs');
   writeFileSync(vbs, `CreateObject("WScript.Shell").Run """${bun}"" ""${mainTs}""", 0, False\r\n`, 'utf8');
-  const ico = writeIcon();
   const shortcuts = shortcutPaths();
   for (const lnk of shortcuts) {
     mkdirSync(dirname(lnk), { recursive: true });
@@ -427,7 +363,7 @@ function install() {
   // Explorer keeps the id a pin had when it was pinned, so an older pin stays a separate button.
   if (tagged.length > shortcuts.length) console.log('    Taskbar pin found: unpin it and pin it again, or the window opens as a second button.');
 
-  console.log(`4/4 Done. Data folder: ${DATA_DIR}`);
+  console.log(`5/5 Done. Data folder: ${DATA_DIR}`);
   console.log(`Open "${APP_NAME}" from the desktop or Start menu. Hook source name: ${sourceApp}`);
   console.log('Events are recorded only while the window is open (minimize it to keep recording).');
 }
@@ -447,7 +383,7 @@ function uninstall() {
 if (args.includes('--hook')) {
   await runHook();
 } else if (args.includes('--install')) {
-  install();
+  await install();
 } else if (args.includes('--uninstall')) {
   uninstall();
 } else if (args.length === 0) {

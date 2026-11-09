@@ -1,8 +1,8 @@
 diff --git a/apps/client/src/App.vue b/apps/client/src/App.vue
-index 0ff6204..bc5d058 100644
+index 0ff6204..a903966 100644
 --- a/apps/client/src/App.vue
 +++ b/apps/client/src/App.vue
-@@ -1,68 +1,69 @@
+@@ -1,68 +1,65 @@
  <template>
    <div class="h-screen flex flex-col bg-[var(--theme-bg-secondary)]">
 -    <!-- Header with Primary Theme Colors -->
@@ -11,9 +11,10 @@ index 0ff6204..bc5d058 100644
 -        <!-- Title Section - Hidden on mobile -->
 -        <div class="mobile:hidden">
 -          <h1 class="text-2xl font-bold text-white drop-shadow-lg">
-+    <!-- Header: one thin bar -->
-+    <header class="short:hidden bg-[var(--theme-bg-primary)] border-b border-[var(--theme-border-primary)]" @contextmenu="onHeaderContextMenu">
-+      <div class="h-10 px-4 mobile:px-2 flex items-center justify-between gap-3">
++    <!-- Header: one thin bar. In the desktop window it is also the title bar: drag it, double-click it,
++         right-click it for the window menu (with "Keep on top"). -->
++    <header class="short:hidden bg-[var(--theme-bg-primary)] border-b border-[var(--theme-border-primary)]" :class="{ 'title-bar': desktopWindow }">
++      <div class="h-10 flex items-center justify-between gap-3" :class="desktopWindow ? 'pl-4 mobile:pl-2' : 'px-4 mobile:px-2'">
 +        <div class="flex items-center gap-3 min-w-0">
 +          <h1 class="text-sm font-semibold tracking-tight text-[var(--theme-text-primary)] mobile:hidden whitespace-nowrap">
              Multi-Agent Observability
@@ -52,20 +53,33 @@ index 0ff6204..bc5d058 100644
 -        <div class="flex items-center mobile:space-x-1 space-x-2">
 -          <span class="text-base mobile:text-xs text-white font-semibold drop-shadow-md bg-[var(--theme-primary-dark)] mobile:px-2 mobile:py-0.5 px-3 py-1.5 rounded-full border border-white/30">
 -            {{ events.length }}
-+        <div class="flex items-center gap-1">
++        <div class="flex items-center gap-1 h-full">
 +          <span class="text-[11px] font-semibold tabular-nums text-[var(--theme-text-secondary)] px-2 py-0.5 rounded-full bg-[var(--theme-bg-tertiary)] border border-[var(--theme-border-primary)] mr-1" title="Events loaded">
 +            {{ events.length }} events
            </span>
 -
 -          <!-- Clear Button -->
--          <button
+           <button
 -            @click="handleClearClick"
 -            class="p-3 mobile:p-1 rounded-lg bg-white/20 hover:bg-white/30 transition-all duration-200 border border-white/30 hover:border-white/50 backdrop-blur-sm shadow-lg hover:shadow-xl"
 -            title="Clear events"
--          >
++            v-if="desktopWindow"
++            @click="setKeepOnTop(!keepOnTop)"
++            class="hdr-btn"
++            :class="{ 'hdr-btn-on': keepOnTop }"
++            :aria-pressed="keepOnTop"
++            :title="keepOnTop ? 'Keep on top is on: click to turn off' : 'Keep this window on top of other windows'"
+           >
 -            <span class="text-2xl mobile:text-base">🗑️</span>
--          </button>
--
++            <svg viewBox="0 0 24 24" width="15" height="15" :fill="keepOnTop ? 'currentColor' : 'none'" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
++              <path d="M12 17v5" />
++              <path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z" />
++            </svg>
+           </button>
++          <button @click="handleClearClick" class="hdr-btn" title="Clear events">🗑️</button>
++          <button @click="showFilters = !showFilters" class="hdr-btn" :title="showFilters ? 'Hide filters' : 'Show filters'">📊</button>
++          <button @click="handleThemeManagerClick" class="hdr-btn" title="Open theme manager">🎨</button>
+ 
 -          <!-- Filters Toggle Button -->
 -          <button
 -            @click="showFilters = !showFilters"
@@ -76,54 +90,35 @@ index 0ff6204..bc5d058 100644
 -          </button>
 -
 -          <!-- Theme Manager Button -->
-           <button
+-          <button
 -            @click="handleThemeManagerClick"
 -            class="p-3 mobile:p-1 rounded-lg bg-white/20 hover:bg-white/30 transition-all duration-200 border border-white/30 hover:border-white/50 backdrop-blur-sm shadow-lg hover:shadow-xl"
 -            title="Open theme manager"
-+            v-if="desktopWindow"
-+            @click="setKeepOnTop(!keepOnTop)"
-+            class="hdr-btn"
-+            :class="{ 'hdr-btn-on': keepOnTop }"
-+            :aria-pressed="keepOnTop"
-+            :title="keepOnTop ? 'Keep on top is on: click to turn off' : 'Keep this window on top of other windows'"
-           >
+-          >
 -            <span class="text-2xl mobile:text-base">🎨</span>
-+            <svg viewBox="0 0 24 24" width="15" height="15" :fill="keepOnTop ? 'currentColor' : 'none'" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-+              <path d="M12 17v5" />
-+              <path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z" />
-+            </svg>
-           </button>
-+          <button @click="handleClearClick" class="hdr-btn" title="Clear events">🗑️</button>
-+          <button @click="showFilters = !showFilters" class="hdr-btn" :title="showFilters ? 'Hide filters' : 'Show filters'">📊</button>
-+          <button @click="handleThemeManagerClick" class="hdr-btn" title="Open theme manager">🎨</button>
+-          </button>
++          <!-- Window buttons (desktop window only) -->
++          <div v-if="desktopWindow" class="flex h-full ml-2">
++            <button class="win-btn" title="Minimize" @click="post('minimize')">
++              <svg viewBox="0 0 10 10" width="10" height="10" aria-hidden="true"><path d="M0 5h10" stroke="currentColor" stroke-width="1" /></svg>
++            </button>
++            <button class="win-btn" :title="maximized ? 'Restore' : 'Maximize'" @click="post('maximize')">
++              <svg v-if="!maximized" viewBox="0 0 10 10" width="10" height="10" aria-hidden="true"><rect x="0.5" y="0.5" width="9" height="9" fill="none" stroke="currentColor" stroke-width="1" /></svg>
++              <svg v-else viewBox="0 0 10 10" width="10" height="10" aria-hidden="true"><path d="M2.5 2.5V0.5h7v7h-2M0.5 2.5h7v7h-7z" fill="none" stroke="currentColor" stroke-width="1" /></svg>
++            </button>
++            <button class="win-btn win-close" title="Close" @click="post('close')">
++              <svg viewBox="0 0 10 10" width="10" height="10" aria-hidden="true"><path d="M0.5 0.5l9 9M9.5 0.5l-9 9" stroke="currentColor" stroke-width="1" /></svg>
++            </button>
++          </div>
          </div>
        </div>
      </header>
 -    
 +
-+    <!-- Header right-click menu (desktop window only) -->
-+    <div
-+      v-if="headerMenu"
-+      class="fixed z-50 min-w-[170px] py-1 rounded-md border border-[var(--theme-border-primary)] bg-[var(--theme-bg-primary)] shadow-lg text-xs"
-+      :style="{ left: headerMenu.x + 'px', top: headerMenu.y + 'px' }"
-+      role="menu"
-+      @mousedown.stop
-+      @contextmenu.prevent
-+    >
-+      <button
-+        role="menuitemcheckbox"
-+        :aria-checked="keepOnTop"
-+        class="w-full flex items-center gap-2 px-3 py-1.5 text-left text-[var(--theme-text-primary)] hover:bg-[var(--theme-bg-tertiary)]"
-+        @click="setKeepOnTop(!keepOnTop); headerMenu = null"
-+      >
-+        <span class="w-3 text-center">{{ keepOnTop ? '✓' : '' }}</span>Keep on top
-+      </button>
-+    </div>
-+
      <!-- Filters -->
      <FilterPanel
        v-if="showFilters"
-@@ -86,7 +87,7 @@
+@@ -86,7 +83,7 @@
          :selected-agents="selectedAgentLanes"
          :events="events"
          :time-range="currentTimeRange"
@@ -132,25 +127,7 @@ index 0ff6204..bc5d058 100644
        />
      </div>
      
-@@ -136,7 +137,7 @@
- </template>
- 
- <script setup lang="ts">
--import { ref, watch } from 'vue';
-+import { ref, watch, onMounted, onUnmounted } from 'vue';
- import type { TimeRange } from './types';
- import { useWebSocket } from './composables/useWebSocket';
- import { useThemes } from './composables/useThemes';
-@@ -148,7 +149,7 @@ import LivePulseChart from './components/LivePulseChart.vue';
- import ThemeManager from './components/ThemeManager.vue';
- import ToastNotification from './components/ToastNotification.vue';
- import AgentSwimLaneContainer from './components/AgentSwimLaneContainer.vue';
--import { WS_URL } from './config';
-+import { WS_URL, API_BASE_URL } from './config';
- 
- // WebSocket connection
- const { events, isConnected, error, clearEvents } = useWebSocket(WS_URL);
-@@ -209,15 +210,51 @@ const dismissToast = (id: number) => {
+@@ -209,15 +206,51 @@ const dismissToast = (id: number) => {
    }
  };
  
@@ -203,64 +180,30 @@ index 0ff6204..bc5d058 100644
    }
  };
  
-@@ -225,11 +262,70 @@ const toggleAgentLane = (agentName: string) => {
+@@ -225,11 +258,42 @@ const toggleAgentLane = (agentName: string) => {
  const handleClearClick = () => {
    clearEvents();
    selectedAgentLanes.value = [];
 +  autoAddedLanes.clear();
 +  dismissedLanes.clear();
-+};
-+
-+// Keep on top: only the desktop launcher serves /desktop/topmost; elsewhere the controls stay hidden.
-+const desktopWindow = ref(false);
-+const keepOnTop = ref(false);
-+const headerMenu = ref<{ x: number; y: number } | null>(null);
-+
-+const setKeepOnTop = async (on: boolean) => {
-+  try {
-+    const res = await fetch(`${API_BASE_URL}/desktop/topmost`, {
-+      method: 'POST',
-+      headers: { 'Content-Type': 'application/json' },
-+      body: JSON.stringify({ on }),
-+    });
-+    if (res.ok) keepOnTop.value = (await res.json()).on;
-+  } catch { /* server gone: leave the state as it was */ }
  };
  
-+const onHeaderContextMenu = (e: MouseEvent) => {
-+  if (!desktopWindow.value) return;
-+  e.preventDefault();
-+  headerMenu.value = { x: Math.min(e.clientX, window.innerWidth - 180), y: e.clientY };
-+};
-+
-+const closeHeaderMenu = () => { headerMenu.value = null; };
-+const onKeydown = (e: KeyboardEvent) => { if (e.key === 'Escape') closeHeaderMenu(); };
-+
-+// Re-read on focus: another window of the dashboard may have changed it.
-+const refreshKeepOnTop = async () => {
-+  try {
-+    const res = await fetch(`${API_BASE_URL}/desktop/topmost`);
-+    if (res.ok) {
-+      keepOnTop.value = (await res.json()).on;
-+      desktopWindow.value = true;
-+    }
-+  } catch { /* not the desktop launcher */ }
-+};
-+
-+onMounted(() => {
-+  window.addEventListener('mousedown', closeHeaderMenu);
-+  window.addEventListener('blur', closeHeaderMenu);
-+  window.addEventListener('keydown', onKeydown);
-+  window.addEventListener('focus', refreshKeepOnTop);
-+  refreshKeepOnTop();
-+});
-+
-+onUnmounted(() => {
-+  window.removeEventListener('mousedown', closeHeaderMenu);
-+  window.removeEventListener('blur', closeHeaderMenu);
-+  window.removeEventListener('keydown', onKeydown);
-+  window.removeEventListener('focus', refreshKeepOnTop);
-+});
++// Desktop window (apps/desktop/host): the page drives its window through chrome.webview messages,
++// and the window answers with { topmost, maximized }. In a plain browser these controls stay hidden.
++type HostBridge = { postMessage(msg: string): void; addEventListener(type: 'message', fn: (e: MessageEvent) => void): void };
++const webview = (window as unknown as { chrome?: { webview?: HostBridge } }).chrome?.webview;
++const desktopWindow = !!webview;
++const keepOnTop = ref(false);
++const maximized = ref(false);
++const post = (msg: string) => webview?.postMessage(msg);
++const setKeepOnTop = (on: boolean) => post(on ? 'topmost:on' : 'topmost:off');
++if (webview) {
++  webview.addEventListener('message', (e) => {
++    keepOnTop.value = !!e.data?.topmost;
++    maximized.value = !!e.data?.maximized;
++  });
++  post('ready');
++}
 +
  // Debug handler for theme manager
  const handleThemeManagerClick = () => {
@@ -275,6 +218,12 @@ index 0ff6204..bc5d058 100644
 +.hdr-btn:hover { background: var(--theme-bg-tertiary); }
 +.hdr-btn { color: var(--theme-text-secondary); }
 +.hdr-btn-on { color: var(--theme-primary); background: var(--theme-bg-tertiary); }
++/* Desktop window: the header is the title bar; its controls stay clickable. */
++.title-bar { app-region: drag; -webkit-app-region: drag; }
++.title-bar button { app-region: no-drag; -webkit-app-region: no-drag; }
++.win-btn { width: 46px; height: 100%; display: inline-flex; align-items: center; justify-content: center; color: var(--theme-text-secondary); transition: background .15s; }
++.win-btn:hover { background: var(--theme-bg-tertiary); color: var(--theme-text-primary); }
++.win-close:hover { background: #c42b1c; color: #fff; }
 +</style>
 diff --git a/apps/client/src/components/AgentSwimLane.vue b/apps/client/src/components/AgentSwimLane.vue
 index 8670fc5..c6611a9 100644
@@ -1532,27 +1481,10 @@ index f5d775f..f332b72 100644
    // Enable WAL mode for better concurrent performance
    db.exec('PRAGMA journal_mode = WAL');
 diff --git a/apps/server/src/index.ts b/apps/server/src/index.ts
-index eddf38f..861097a 100644
+index eddf38f..cc86e0c 100644
 --- a/apps/server/src/index.ts
 +++ b/apps/server/src/index.ts
-@@ -119,6 +119,16 @@ const server = Bun.serve({
-     if (req.method === 'OPTIONS') {
-       return new Response(null, { headers });
-     }
-+
-+    // Desktop window controls, present only when apps/desktop/main.ts hosts this server.
-+    const desktop = (globalThis as any).__observabilityDesktop;
-+    if (url.pathname === '/desktop/topmost' && desktop) {
-+      if (req.method === 'POST') {
-+        const body = await req.json().catch(() => ({}));
-+        return Response.json({ on: desktop.setTopmost(!!body.on) }, { headers });
-+      }
-+      return Response.json({ on: desktop.getTopmost() }, { headers });
-+    }
-     
-     // POST /events - Receive new events
-     if (url.pathname === '/events' && req.method === 'POST') {
-@@ -413,6 +423,21 @@ const server = Bun.serve({
+@@ -413,6 +413,21 @@ const server = Bun.serve({
        }
      }
      
