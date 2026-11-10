@@ -29,6 +29,7 @@ This project is unofficial and not affiliated with Anthropic or the original aut
 - **Per-session lanes, automatic**: every active session gets its own graph row; the combined "Live Activity Pulse" opens only while nothing is running.
 - **Cleaner look**: thin header, compact chips, rounded bars stacked by session color, tool icons stacked on light badges from the bottom of each bar (readable on dark themes), a colorblind-checked session palette, dark theme by default.
 - **Clear follow mode**: a "Live" pill while the event list follows new events, "Latest" once you scroll away (click to jump back).
+- **Background count**: the "background" chip next to the pulse counters shows how many background commands, subagents and monitors are running now, across sessions (hover for the list). Claude Code reports the list each time a session finishes replying, so a command that ends in between is still counted until then.
 - **Keep on top**: the pin button in the header, or **Keep on top** in the menu you get by right-clicking the header, keeps the window above other windows. It, and the window size and place, are kept for the next launch.
 
 ![Default view while sessions are running: one lane per session](docs/screenshot-lanes.png)
@@ -128,6 +129,7 @@ Removes the hooks and shortcuts (history in `%LOCALAPPDATA%\ClaudeObservability`
 - **세션별 그래프 자동 표시**: 활동 중인 세션마다 그래프 한 줄이 생기고, 전체 그래프(Live Activity Pulse)는 아무 세션도 돌지 않을 때만 펼쳐집니다.
 - **깔끔한 디자인**: 얇은 상단 줄, 작은 칩, 세션 색으로 쌓은 둥근 막대, 막대 아래쪽부터 흰 배지 위에 쌓은 도구 아이콘(다크 테마에서도 잘 보임), 색약을 고려한 세션 색, 기본 다크 테마.
 - **알기 쉬운 자동 스크롤**: 이벤트 목록이 새 이벤트를 따라가는 동안은 "Live", 위로 스크롤하면 "Latest"로 바뀝니다(누르면 최신으로 이동).
+- **백그라운드 개수**: Live Activity Pulse 옆 "background" 칩이 지금 실행 중인 백그라운드 명령·서브에이전트·모니터 수를 세션 전체에 걸쳐 보여 줍니다(마우스를 올리면 목록). Claude Code가 세션이 응답을 마칠 때마다 목록을 알려 주기 때문에, 그 사이에 끝난 명령은 그때까지 개수에 남습니다.
 - **맨 위에 고정**: 상단 줄의 핀 버튼이나, 상단 줄을 우클릭해 나오는 메뉴의 **Keep on top**으로 창을 다른 창 위에 고정합니다. 이 설정과 창 크기·위치는 다음 실행 때도 유지됩니다.
 
 화면 예시는 위 영어 안내의 스크린샷을 보세요(예시 데이터: 두 대의 PC에서 도는 세션 3개).

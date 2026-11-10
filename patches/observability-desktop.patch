@@ -1,5 +1,5 @@
 diff --git a/apps/client/src/App.vue b/apps/client/src/App.vue
-index 0ff6204..a903966 100644
+index 0ff6204..f72d74e 100644
 --- a/apps/client/src/App.vue
 +++ b/apps/client/src/App.vue
 @@ -1,68 +1,65 @@
@@ -118,7 +118,15 @@ index 0ff6204..a903966 100644
      <!-- Filters -->
      <FilterPanel
        v-if="showFilters"
-@@ -86,7 +83,7 @@
+@@ -74,6 +71,7 @@
+     <!-- Live Pulse Chart -->
+     <LivePulseChart
+       :events="events"
++      :background-tasks="backgroundTasks"
+       :filters="filters"
+       @update-unique-apps="uniqueAppNames = $event"
+       @update-all-apps="allAppNames = $event"
+@@ -86,7 +84,7 @@
          :selected-agents="selectedAgentLanes"
          :events="events"
          :time-range="currentTimeRange"
@@ -127,7 +135,16 @@ index 0ff6204..a903966 100644
        />
      </div>
      
-@@ -209,15 +206,51 @@ const dismissToast = (id: number) => {
+@@ -151,7 +149,7 @@ import AgentSwimLaneContainer from './components/AgentSwimLaneContainer.vue';
+ import { WS_URL } from './config';
+ 
+ // WebSocket connection
+-const { events, isConnected, error, clearEvents } = useWebSocket(WS_URL);
++const { events, backgroundTasks, isConnected, error, clearEvents } = useWebSocket(WS_URL);
+ 
+ // Theme management (sets up theme system)
+ useThemes();
+@@ -209,15 +207,51 @@ const dismissToast = (id: number) => {
    }
  };
  
@@ -180,7 +197,7 @@ index 0ff6204..a903966 100644
    }
  };
  
-@@ -225,11 +258,42 @@ const toggleAgentLane = (agentName: string) => {
+@@ -225,11 +259,42 @@ const toggleAgentLane = (agentName: string) => {
  const handleClearClick = () => {
    clearEvents();
    selectedAgentLanes.value = [];
@@ -530,10 +547,10 @@ index a0ec01c..0e90cca 100644
    if (props.stickToBottom) {
      await nextTick();
 diff --git a/apps/client/src/components/LivePulseChart.vue b/apps/client/src/components/LivePulseChart.vue
-index 2c60a8a..2e5bd31 100644
+index 2c60a8a..5561a71 100644
 --- a/apps/client/src/components/LivePulseChart.vue
 +++ b/apps/client/src/components/LivePulseChart.vue
-@@ -1,42 +1,43 @@
+@@ -1,44 +1,59 @@
  <template>
 -  <div class="bg-gradient-to-r from-[var(--theme-bg-primary)] to-[var(--theme-bg-secondary)] px-3 py-4 mobile:py-2 shadow-lg">
 -    <div class="flex items-center justify-between mb-3 mobile:mb-2">
@@ -542,11 +559,12 @@ index 2c60a8a..2e5bd31 100644
        <div class="flex items-center gap-3 mobile:gap-2">
 -        <h3 class="text-base mobile:text-xs font-bold text-[var(--theme-primary)] drop-shadow-sm flex items-center">
 -          <span class="mr-1.5 mobile:mr-1 text-xl mobile:text-sm">📊</span>
+-          <span class="mobile:hidden">Live Activity Pulse</span>
+-        </h3>
 +        <button type="button" class="text-sm mobile:text-xs font-semibold text-[var(--theme-text-primary)] flex items-center gap-1 rounded-md px-1 -ml-1 hover:bg-[var(--theme-bg-tertiary)]" :aria-expanded="!collapsed" :title="collapsed ? 'Show chart' : 'Hide chart'" @click="toggleCollapsed">
 +          <span class="inline-block w-3 text-[10px] text-[var(--theme-text-tertiary)] transition-transform" :class="collapsed ? '' : 'rotate-90'">▶</span>
 +          <span class="mr-1 mobile:mr-1 text-sm">📊</span>
-           <span class="mobile:hidden">Live Activity Pulse</span>
--        </h3>
++          <span class="mobile:hidden whitespace-nowrap">Live Activity Pulse</span>
 +        </button>
          <div class="flex items-center gap-1.5 flex-wrap">
            <div
@@ -593,8 +611,24 @@ index 2c60a8a..2e5bd31 100644
 +            <span class="text-xs font-semibold tabular-nums text-[var(--theme-text-primary)]">{{ formatGap(eventTimingMetrics.avgGap) }}</span>
              <span class="text-xs mobile:text-[10px] text-[var(--theme-text-tertiary)] font-medium mobile:hidden">avg gap</span>
            </div>
++          <div
++            class="flex items-center gap-1.5 px-2 py-0.5 rounded-full border"
++            :class="runningBackground.length
++              ? 'bg-amber-500/10 border-amber-500/30'
++              : 'bg-[var(--theme-bg-tertiary)] border-[var(--theme-border-primary)]'"
++            :title="backgroundTitle"
++          >
++            <span class="relative flex h-1.5 w-1.5">
++              <span v-if="runningBackground.length" class="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75"></span>
++              <span class="relative inline-flex rounded-full h-1.5 w-1.5" :class="runningBackground.length ? 'bg-amber-500' : 'bg-[var(--theme-text-tertiary)]'"></span>
++            </span>
++            <span class="text-xs font-semibold tabular-nums" :class="runningBackground.length ? 'text-amber-500' : 'text-[var(--theme-text-primary)]'">{{ runningBackground.length }}</span>
++            <span class="text-xs mobile:text-[10px] text-[var(--theme-text-tertiary)] font-medium mobile:hidden">background</span>
++          </div>
          </div>
-@@ -48,10 +49,10 @@
+       </div>
+       <div class="flex gap-1.5 mobile:gap-1" role="tablist" aria-label="Time range selector">
+@@ -48,10 +63,10 @@
            @click="setTimeRange(range)"
            @keydown="handleTimeRangeKeyDown($event, index)"
            :class="[
@@ -608,7 +642,7 @@ index 2c60a8a..2e5bd31 100644
            ]"
            role="tab"
            :aria-selected="timeRange === range"
-@@ -62,7 +63,7 @@
+@@ -62,7 +77,7 @@
          </button>
        </div>
      </div>
@@ -617,7 +651,7 @@ index 2c60a8a..2e5bd31 100644
        <canvas
          ref="canvas"
          class="w-full cursor-crosshair"
-@@ -74,7 +75,7 @@
+@@ -74,7 +89,7 @@
        ></canvas>
        <div
          v-if="tooltip.visible"
@@ -626,16 +660,26 @@ index 2c60a8a..2e5bd31 100644
          :style="{ left: tooltip.x + 'px', top: tooltip.y + 'px' }"
        >
          {{ tooltip.text }}
-@@ -93,7 +94,7 @@
+@@ -93,8 +108,8 @@
  </template>
  
  <script setup lang="ts">
 -import { ref, onMounted, onUnmounted, watch, computed } from 'vue';
+-import type { HookEvent, TimeRange, ChartConfig } from '../types';
 +import { ref, onMounted, onUnmounted, watch, computed, nextTick } from 'vue';
- import type { HookEvent, TimeRange, ChartConfig } from '../types';
++import type { HookEvent, TimeRange, ChartConfig, BackgroundTask } from '../types';
  import { useChartData } from '../composables/useChartData';
  import { createChartRenderer, type ChartDimensions } from '../utils/chartRenderer';
-@@ -118,7 +119,7 @@ const emit = defineEmits<{
+ import { useEventEmojis } from '../composables/useEventEmojis';
+@@ -102,6 +117,7 @@ import { useEventColors } from '../composables/useEventColors';
+ 
+ const props = defineProps<{
+   events: HookEvent[];
++  backgroundTasks: BackgroundTask[];
+   filters: {
+     sourceApp: string;
+     sessionId: string;
+@@ -118,7 +134,7 @@ const emit = defineEmits<{
  const canvas = ref<HTMLCanvasElement>();
  const chartContainer = ref<HTMLDivElement>();
  const windowHeight = ref(typeof window !== 'undefined' ? window.innerHeight : 600);
@@ -644,7 +688,30 @@ index 2c60a8a..2e5bd31 100644
  
  const timeRanges: TimeRange[] = ['1m', '3m', '5m', '10m'];
  
-@@ -214,10 +215,10 @@ const getDimensions = (): ChartDimensions => {
+@@ -169,6 +185,22 @@ const processedEventIds = new Set<string>();
+ const { formatEventTypeLabel } = useEventEmojis();
+ const { getHexColorForSession } = useEventColors();
+ 
++// Background work running now (not limited to the time window); follows the session / app filters.
++const runningBackground = computed(() => props.backgroundTasks.filter(t =>
++  (!props.filters.sourceApp || t.source_app === props.filters.sourceApp) &&
++  (!props.filters.sessionId || t.session_id === props.filters.sessionId)));
++
++const backgroundTitle = computed(() => {
++  const list = runningBackground.value;
++  if (!list.length) return 'No background commands, subagents or monitors running';
++  const lines = list.slice(0, 12).map(t => {
++    const mins = Math.max(0, Math.round((Date.now() - t.since) / 60000));
++    return `${t.type} · ${t.source_app}:${t.session_id.slice(0, 8)} · ${mins}m · ${t.description.slice(0, 60)}`;
++  });
++  if (list.length > 12) lines.push(`… ${list.length - 12} more`);
++  return [`${list.length} running in the background`, ...lines, "(a command that ended shows until the session's next reply)"].join('\n');
++});
++
+ const hasData = computed(() => dataPoints.value.some(dp => dp.count > 0));
+ 
+ const totalEventCount = computed(() => {
+@@ -214,10 +246,10 @@ const getDimensions = (): ChartDimensions => {
      width,
      height: chartHeight.value,
      padding: {
@@ -657,7 +724,7 @@ index 2c60a8a..2e5bd31 100644
      }
    };
  };
-@@ -258,6 +259,27 @@ const animateNewEvent = (x: number, y: number) => {
+@@ -258,6 +290,27 @@ const animateNewEvent = (x: number, y: number) => {
    animate();
  };
  
@@ -895,6 +962,63 @@ index 9e616d4..159bfa9 100644
 -}
 \ No newline at end of file
 +}
+diff --git a/apps/client/src/composables/useWebSocket.ts b/apps/client/src/composables/useWebSocket.ts
+index b079a20..19edc4b 100644
+--- a/apps/client/src/composables/useWebSocket.ts
++++ b/apps/client/src/composables/useWebSocket.ts
+@@ -1,8 +1,9 @@
+ import { ref, onMounted, onUnmounted } from 'vue';
+-import type { HookEvent, WebSocketMessage } from '../types';
++import type { HookEvent, WebSocketMessage, BackgroundTask } from '../types';
+ 
+ export function useWebSocket(url: string) {
+   const events = ref<HookEvent[]>([]);
++  const backgroundTasks = ref<BackgroundTask[]>([]); // replaced whole by each 'background' message
+   const isConnected = ref(false);
+   const error = ref<string | null>(null);
+   
+@@ -30,6 +31,8 @@ export function useWebSocket(url: string) {
+             const initialEvents = Array.isArray(message.data) ? message.data : [];
+             // Only keep the most recent events up to maxEvents
+             events.value = initialEvents.slice(-maxEvents);
++          } else if (message.type === 'background') {
++            backgroundTasks.value = Array.isArray(message.data) ? message.data as BackgroundTask[] : [];
+           } else if (message.type === 'event') {
+             const newEvent = message.data as HookEvent;
+             events.value.push(newEvent);
+@@ -92,6 +95,7 @@ export function useWebSocket(url: string) {
+ 
+   return {
+     events,
++    backgroundTasks,
+     isConnected,
+     error,
+     clearEvents
+diff --git a/apps/client/src/types.ts b/apps/client/src/types.ts
+index ec5409c..83ba181 100644
+--- a/apps/client/src/types.ts
++++ b/apps/client/src/types.ts
+@@ -48,8 +48,18 @@ export interface FilterOptions {
+ }
+ 
+ export interface WebSocketMessage {
+-  type: 'initial' | 'event' | 'hitl_response';
+-  data: HookEvent | HookEvent[] | HumanInTheLoopResponse;
++  type: 'initial' | 'event' | 'hitl_response' | 'background';
++  data: HookEvent | HookEvent[] | HumanInTheLoopResponse | BackgroundTask[];
++}
++
++// Running background work of a Claude Code session (apps/server/src/background.ts).
++export interface BackgroundTask {
++  id: string;
++  type: string; // shell | subagent | monitor
++  description: string;
++  source_app: string;
++  session_id: string;
++  since: number;
+ }
+ 
+ export type TimeRange = '1m' | '3m' | '5m' | '10m';
 diff --git a/apps/client/src/utils/chartRenderer.ts b/apps/client/src/utils/chartRenderer.ts
 index 9224486..5698771 100644
 --- a/apps/client/src/utils/chartRenderer.ts
@@ -1466,6 +1590,99 @@ index 9224486..5698771 100644
 -}
 \ No newline at end of file
 +}
+diff --git a/apps/server/src/background.ts b/apps/server/src/background.ts
+new file mode 100644
+index 0000000..b09f5a3
+--- /dev/null
++++ b/apps/server/src/background.ts
+@@ -0,0 +1,87 @@
++// Background work Claude Code sessions have running right now: background shell commands, subagents
++// launched asynchronously, and monitors. Kept from hook events:
++//   - PostToolUse of a launch adds the task at once (Bash backgroundTaskId, Agent isAsync + agentId),
++//   - SubagentStop removes the agent that finished,
++//   - Stop carries the session's own list (payload.background_tasks, running ones only) and replaces it,
++//   - SessionEnd clears the session.
++// A shell command that ends between two Stop events stays listed until the next Stop: no hook reports it.
++import type { HookEvent } from './types';
++
++export interface BackgroundTask {
++  id: string;
++  type: string; // shell | subagent | monitor
++  description: string;
++  source_app: string;
++  session_id: string;
++  since: number;
++}
++
++const tasks = new Map<string, BackgroundTask>(); // key: session_id + ' ' + task id
++const lastSeen = new Map<string, number>(); // session_id -> last event time
++const STALE_MS = 12 * 60 * 60 * 1000; // a session silent this long (closed or crashed) drops its tasks
++
++const key = (session: string, id: string) => `${session} ${id}`;
++
++function dropSession(session: string) {
++  for (const [k, t] of tasks) if (t.session_id === session) tasks.delete(k);
++}
++
++function signature(): string {
++  return [...tasks.keys()].sort().join('|');
++}
++
++function pruneStale(now: number) {
++  for (const [session, seen] of lastSeen) {
++    if (now - seen > STALE_MS) { dropSession(session); lastSeen.delete(session); }
++  }
++}
++
++// Returns true when the set of running tasks changed.
++export function trackEvent(e: HookEvent): boolean {
++  const before = signature();
++  const p: any = e.payload ?? {};
++  const session = e.session_id;
++  const now = e.timestamp ?? Date.now();
++  lastSeen.set(session, now);
++  const add = (id: string, type: string, description: string) => {
++    if (!id || tasks.has(key(session, id))) return;
++    tasks.set(key(session, id), { id, type, description: description || type, source_app: e.source_app, session_id: session, since: now });
++  };
++
++  switch (e.hook_event_type) {
++    case 'PostToolUse': {
++      const r = p.tool_response ?? {};
++      if (r.backgroundTaskId) add(String(r.backgroundTaskId), 'shell', p.tool_input?.description || p.tool_input?.command);
++      if (r.isAsync && r.agentId) add(String(r.agentId), 'subagent', r.description || p.tool_input?.description);
++      break;
++    }
++    case 'SubagentStop':
++      if (p.agent_id) tasks.delete(key(session, String(p.agent_id)));
++      break;
++    case 'Stop':
++      if (Array.isArray(p.background_tasks)) {
++        const kept = new Map<string, number>();
++        for (const t of tasks.values()) if (t.session_id === session) kept.set(t.id, t.since);
++        dropSession(session);
++        for (const t of p.background_tasks) {
++          if (t?.status && t.status !== 'running') continue;
++          const id = String(t.id);
++          tasks.set(key(session, id), {
++            id, type: t.type || 'task', description: t.description || t.command || t.type,
++            source_app: e.source_app, session_id: session, since: kept.get(id) ?? now,
++          });
++        }
++      }
++      break;
++    case 'SessionEnd':
++      dropSession(session);
++      break;
++  }
++  pruneStale(Date.now());
++  return signature() !== before;
++}
++
++export function backgroundTasks(): BackgroundTask[] {
++  pruneStale(Date.now());
++  return [...tasks.values()].sort((a, b) => a.since - b.since);
++}
 diff --git a/apps/server/src/db.ts b/apps/server/src/db.ts
 index f5d775f..f332b72 100644
 --- a/apps/server/src/db.ts
@@ -1481,10 +1698,49 @@ index f5d775f..f332b72 100644
    // Enable WAL mode for better concurrent performance
    db.exec('PRAGMA journal_mode = WAL');
 diff --git a/apps/server/src/index.ts b/apps/server/src/index.ts
-index eddf38f..cc86e0c 100644
+index eddf38f..1d572ee 100644
 --- a/apps/server/src/index.ts
 +++ b/apps/server/src/index.ts
-@@ -413,6 +413,21 @@ const server = Bun.serve({
+@@ -11,12 +11,28 @@ import {
+   getThemeStats 
+ } from './theme';
+ 
++import { trackEvent, backgroundTasks } from './background';
++
+ // Initialize database
+ initDatabase();
+ 
+ // Store WebSocket clients
+ const wsClients = new Set<any>();
+ 
++// Running background tasks: rebuilt from recent history, then kept up to date by each new event.
++for (const e of getRecentEvents(5000)) trackEvent(e);
++let backgroundSent = JSON.stringify(backgroundTasks());
++function broadcastBackground(force = false) {
++  const data = JSON.stringify(backgroundTasks());
++  if (!force && data === backgroundSent) return;
++  backgroundSent = data;
++  const message = `{"type":"background","data":${data}}`;
++  wsClients.forEach(client => {
++    try { client.send(message); } catch { wsClients.delete(client); }
++  });
++}
++setInterval(() => broadcastBackground(), 60_000); // drops sessions gone silent
++
+ // Helper function to send response to agent via WebSocket
+ async function sendResponseToAgent(
+   wsUrl: string,
+@@ -146,7 +162,8 @@ const server = Bun.serve({
+             wsClients.delete(client);
+           }
+         });
+-        
++        if (trackEvent(savedEvent)) broadcastBackground(true);
++
+         return new Response(JSON.stringify(savedEvent), {
+           headers: { ...headers, 'Content-Type': 'application/json' }
+         });
+@@ -413,6 +430,21 @@ const server = Bun.serve({
        }
      }
      
@@ -1506,3 +1762,11 @@ index eddf38f..cc86e0c 100644
      // Default response
      return new Response('Multi-Agent Observability Server', {
        headers: { ...headers, 'Content-Type': 'text/plain' }
+@@ -427,6 +459,7 @@ const server = Bun.serve({
+       // Send recent events on connection
+       const events = getRecentEvents(300);
+       ws.send(JSON.stringify({ type: 'initial', data: events }));
++      ws.send(JSON.stringify({ type: 'background', data: backgroundTasks() }));
+     },
+     
+     message(ws, message) {
